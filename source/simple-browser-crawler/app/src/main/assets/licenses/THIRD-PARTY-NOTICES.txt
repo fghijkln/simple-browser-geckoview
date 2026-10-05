@@ -1,0 +1,22 @@
+第三方组件与许可通知
+
+本应用的浏览器内核为 Mozilla GeckoView 157.0.20260924084938。
+
+Mozilla GeckoView
+- Maven 坐标：org.mozilla.geckoview:geckoview:157.0.20260924084938
+- 官方 Maven 源：https://maven.mozilla.org/maven2/
+- GeckoView 官方 Maven POM 声明的许可证：Mozilla Public License 2.0（MPL-2.0）。随包完整文本：MOZILLA-GECKOVIEW-MPL-2.0.txt。
+- 本次解析得到的上游源代码提交：8eb25af4acf031ab1e06abf1a912275083c820ed，mozilla-release。
+- 对应官方源代码修订页（包含获取该 Source Code Form 的方式）：
+  https://hg.mozilla.org/releases/mozilla-release/rev/8eb25af4acf031ab1e06abf1a912275083c820ed
+- 上游源码未在本项目中修改；本应用自身代码与 Mozilla Covered Software 保持独立。Mozilla/Firefox/GeckoView 商标不因该许可证授予本应用任何背书或品牌使用权。
+
+构建与传递组件
+- AndroidX AppCompat、AndroidX Core、Kotlin 标准库、AndroidX Annotation/Collection/Lifecycle、Google Play Services FIDO、SnakeYAML 与 AndroidX Media3 的解析版本及各自许可证/NOTICE，以各组件随附的 Maven 元数据为准；本项目不把它们统称为 MPL-2.0。
+- Apache License 2.0 完整文本随包提供于 APACHE-2.0.txt。具体解析组件、版本、Maven 坐标和 POM 许可证字段另见源码包 docs/DEPENDENCY-LICENSE-AUDIT.md。
+- GeckoView AAR 含 Mozilla 的 libxul.so、libmozglue.so 等 Gecko native 二进制；这些是 Gecko 引擎的 Mozilla native 库。MPL-2.0 第 3.2 节要求向 APK 接收方说明如何及时获取对应 Source Code Form；上述固定上游修订链接即为来源路径。
+
+搜索服务图标
+- 图标来源、对应搜索服务页面与文件 SHA-256 记录见 SEARCH-ENGINE-ICON-ATTRIBUTION.txt 及源码包 app/src/main/assets/engine-icons/PROVENANCE.tsv。图标仅用于识别相应搜索选项；商标和版权归各自权利人。本应用不声称这些搜索服务背书本应用。
+
+本通知用于识别随包组件与对应许可，不构成法律意见。

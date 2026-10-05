@@ -1,0 +1,5 @@
+Original offline wallpaper library provenance
+
+Generated on 2026-10-03 with the built-in GPT Image 2.5 image generator. The thirteen JPEG files in this directory were generated as original artwork for this application; they contain no intentionally requested text, logos, or watermarks. Each was generated at 1440 x 2560 portrait resolution and encoded as high-quality JPEG (quality 91, 4:4:4 chroma) for offline APK bundling.
+
+The fourteenth entry, "暮光庭院" (courtyard), reuses the application's existing original 1440 x 2560 image at app/src/main/res/drawable-nodpi/new_tab_wallpaper.png. All fourteen images are packaged with the application. They are not downloaded at runtime and are not sourced from external image libraries or third-party wallpaper applications.
