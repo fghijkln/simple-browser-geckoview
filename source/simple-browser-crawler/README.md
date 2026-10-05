@@ -1,4 +1,4 @@
-# 简浏览（Android）2.5.0
+# 简浏览（Android）2.6.0
 
 本项目是一个简体中文 Android 浏览器，内核为 Mozilla GeckoView Stable `157.0.20260924084938`，不使用系统 WebView，也不包含 Cefrium、CEF、Chromium runtime 或 `libcef.so`。APK 中出现 Mozilla GeckoView 自有 native 库（例如 `libxul.so`、`libmozglue.so`）属于预期：它们是 Gecko 引擎，不是 Chromium。版本、Maven 坐标、Android 要求、安全 API 与许可证来源见 [`docs/GECKOVIEW-OFFICIAL-RESEARCH.md`](docs/GECKOVIEW-OFFICIAL-RESEARCH.md)。
 
@@ -32,6 +32,12 @@ WebRTC PeerConnection 防护默认开启：应用通过 Mozilla 标记为 **Expe
 
 可选 DNS-only VPN 是独立实验原型，需 Android 显示系统授权；它只尝试处理发往指定 DNS resolver 地址的端口 53 流量，不接管通用流量。VPN 图标或 DoH 请求成功都不能证明 GeckoView 的 DNS 已进入该隧道。没有访问公网 DNS/WebRTC 泄漏检测站，也没有向 Quad9 发送测试查询；DoH 测试使用 loopback HTTPS mock。
 
+## 应用自身特权守卫
+
+本版本在应用启动、Activity 恢复前及 DNS-only VPN 服务启动时，对**本应用自身**执行 fail-closed 检查：合并后的权限请求清单必须符合审阅过的 allowlist；危险权限、特殊 App Ops、设备管理、无障碍与通知监听等本应用特权状态必须符合策略；应用进程 UID 不能是 root 或 shell，且有效 Linux capabilities（`CapEff`、`CapPrm`、`CapInh`、`CapAmb`）必须可读并为零。所需系统状态无法读取或无法解析时，应用停止继续启动。审计细节见 [`docs/PRIVILEGE-GUARD-AUDIT.md`](docs/PRIVILEGE-GUARD-AUDIT.md)。
+
+守卫只检查本应用及当前进程，**不检查整台设备是否 root**，也不能对抗已控制内核/操作系统、被修改的系统 API 或运行时注入。它不是后台持续监视器：在应用仍运行时发生的外部变化，通常要到下一次上述检查点才会被发现。GeckoView 157 的 isolated content process 与全站点 Fission 是显式配置层面的隔离增强；没有连接设备或模拟器，未验证其真机运行效果。
+
 受控抓取器单独使用 Android Java HTTP(S) 连接和系统名称解析，不继承 GeckoView 的 Quad9 TRR-only 配置，也不保证经过 DNS-only VPN；输入页和每次重定向会校验 HTTPS/同源范围，并拒绝可识别的本机、私有和特殊用途 IP 地址。DNS 预检与连接之间仍存在系统解析/时间差边界，因此 UI 不声称同等 DNS 隐私。robots.txt 是抓取规则而不是访问授权；公开可读也不自动授予复制或再发布权。规范与实际行为及尚未覆盖的页面类型见 [`docs/CRAWLER-IMPLEMENTATION-REPORT.md`](docs/CRAWLER-IMPLEMENTATION-REPORT.md)。
 
 ## 手动 Android 权限与设备能力
@@ -53,4 +59,4 @@ bash tools/run-crawler-local-mock.sh
 ./gradlew --no-daemon :app:lintRelease :app:assembleRelease
 ```
 
-Release 任务使用当前项目的 Android debug signing key，**不是应用商店生产签名**。因应用最低版本为 API 29，本次 `apksigner` 报告的签名方案应以交付校验日志中的实际结果为准。APK 核验、哈希、lint/build 日志和运行限制随本次构建报告交付。当前环境没有可用 Android 设备/模拟器，所以构建与离线测试不代表已安装、启动或真机网络行为通过。
+Release 任务使用项目现有的 Android debug signing key，**不是应用商店生产签名**；候选构建须与 v0.3 APK 的证书指纹匹配。APK 核验、哈希、lint/build 日志和运行限制随构建报告提供。当前没有连接的 Android 设备或模拟器，因此构建与离线测试不代表已安装、启动或真机网络行为通过。

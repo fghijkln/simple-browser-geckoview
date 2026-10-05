@@ -190,6 +190,8 @@ final class GeckoViewBrowserAdapter {
                 .aboutConfigEnabled(false)
                 .consoleOutput(false)
                 .debugLogging(false)
+                .fissionEnabled(true)
+                .isolatedProcessEnabled(true)
                 .loginAutofillEnabled(false)
                 .extensionsWebAPIEnabled(false)
                 .contentBlocking(contentBlocking)
@@ -198,6 +200,8 @@ final class GeckoViewBrowserAdapter {
                 .trustedRecursiveResolverUri(QUAD9_DOH_URI)
                 .arguments(new String[] {"-profile", profileDirectory})
                 .build();
+        settings.setWebContentIsolationStrategy(
+                GeckoRuntimeSettings.STRATEGY_ISOLATE_EVERYTHING);
         runtime = GeckoRuntime.create(applicationContext, settings);
         activeProfilePath = profileDirectory;
         return runtime;
