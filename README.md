@@ -11,6 +11,12 @@
 
 这是两个按 ABI 分开的 APK，不提供 universal APK。最低 Android 版本为 API 29；目标 API 为 35。SHA-256 校验值见仓库中的 [`checksums.txt`](checksums.txt)。
 
+## 源码
+
+- [简浏览 2.3.0 源码目录](source/simple-browser-fingerprint/)
+
+该应用源码未附单独的项目级许可证。依赖许可证审计和第三方通知见[依赖许可证审计](source/simple-browser-fingerprint/docs/DEPENDENCY-LICENSE-AUDIT.md)与[第三方通知](source/simple-browser-fingerprint/app/src/main/assets/licenses/THIRD-PARTY-NOTICES.txt)。
+
 ## 功能与技术
 
 - 原生 Android 浏览器界面，支持标签、新标签页、前进/后退、刷新、主页、历史记录、书签和 HTTPS 下载。
@@ -56,6 +62,12 @@ Simple Browser is a Simplified Chinese Android browser built on Mozilla GeckoVie
 - [x86_64 APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.1/app-x86_64-release.apk)
 
 These are ABI-specific APKs; there is no universal APK. Minimum Android API is 29 and target API is 35. SHA-256 values are listed in the repository's [`checksums.txt`](checksums.txt).
+
+## Source code
+
+- [Simple Browser 2.3.0 source directory](source/simple-browser-fingerprint/)
+
+The application source does not include a separate project-level license. Dependency license information and notices are documented in the [dependency/license audit](source/simple-browser-fingerprint/docs/DEPENDENCY-LICENSE-AUDIT.md) and [third-party notices](source/simple-browser-fingerprint/app/src/main/assets/licenses/THIRD-PARTY-NOTICES.txt).
 
 ## Features and stack
 

@@ -1,0 +1,30 @@
+Search engine logo and favicon attribution
+
+Provider-issued brand artwork; trademarks and copyright remain with their respective owners. No permissive icon license was asserted. Bundled solely to identify the corresponding search choice; this independent browser is not endorsed by the provider.
+
+Each bundled image was obtained from the provider page or its official static asset host. The image is used only to identify the corresponding search-engine choice.
+
+Provider assets and source pages (HTTPS):
+- Google: icon https://www.google.com/favicon.ico — source page https://www.google.com/
+- Bing: icon https://www.bing.com/sa/simg/favicon-trans-bg-blue-mg-png.png — source page https://www.bing.com/
+- Yahoo: icon https://s.yimg.com/pv/static/img/y_icon_iphone_120.min.png — source page https://search.yahoo.com/
+- DuckDuckGo: icon https://duckduckgo.com/static-assets/favicons/DDG-iOS-icon_120x120.png — source page https://duckduckgo.com/
+- Brave Search: icon https://brave.com/favicon.ico — source page https://brave.com/
+- Startpage: icon https://www.startpage.com/favicon.ico — source page https://www.startpage.com/
+- Ecosia: icon https://www.ecosia.org/favicon.ico — source page https://www.ecosia.org/
+- Qwant: icon https://www.qwant.com/favicon-64.8128b16d1a5487d88013f871a83e90c4.png — source page https://www.qwant.com/
+- Mojeek: icon https://www.mojeek.com/favicon.ico — source page https://www.mojeek.com/
+- Swisscows: icon https://swisscows.com/favicon-72.png — source page https://swisscows.com/en
+- Yandex: icon https://yastatic.net/s3/home-static/_/nova3/JSRBlH1m.png — source page https://yandex.com/
+- Kagi: icon https://kagi.com/favicon-32x32.png — source page https://kagi.com/
+- Naver: icon https://search.naver.com/favicon.ico — source page https://search.naver.com/
+- Seznam: icon https://www.seznam.cz/favicon.ico — source page https://search.seznam.cz/
+- MetaGer: icon https://metager.org/img/favicon/favicon-1024.png — source page https://metager.org/
+- Perplexity: icon https://www.perplexity.ai/favicon.ico — source page https://www.perplexity.ai/
+- You.com: icon https://you.com/favicon.ico?favicon.2oo7buuzhxlge.ico — source page https://you.com/
+- Marginalia Search: icon https://marginalia-search.com/favicon.ico — source page https://marginalia-search.com/
+- Wiby: icon https://wiby.me/favicon.ico — source page https://wiby.me/
+- Mwmbl: icon https://mwmbl.org/favicon.png — source page https://mwmbl.org/
+- Wikipedia: icon https://www.wikipedia.org/static/apple-touch/wikipedia.png — source page https://www.wikipedia.org/
+
+The bundled icon filename and SHA-256 for each engine are recorded in engine-icons/PROVENANCE.tsv.

@@ -1,0 +1,12 @@
+plugins {
+    id 'com.android.application' version '9.4.0' apply false
+}
+
+def externalBuildRoot = System.getenv('SIMPLE_BROWSER_BUILD_ROOT')
+if (externalBuildRoot == null || externalBuildRoot.trim().isEmpty()) {
+    externalBuildRoot = new File(rootDir.parentFile, rootDir.name + '-build/gradle').absolutePath
+}
+
+allprojects {
+    project.buildDir = new File(externalBuildRoot, project.name)
+}
