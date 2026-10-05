@@ -1,4 +1,4 @@
-# 简浏览（Android）2.4.0
+# 简浏览（Android）2.5.0
 
 本项目是一个简体中文 Android 浏览器，内核为 Mozilla GeckoView Stable `157.0.20260924084938`，不使用系统 WebView，也不包含 Cefrium、CEF、Chromium runtime 或 `libcef.so`。APK 中出现 Mozilla GeckoView 自有 native 库（例如 `libxul.so`、`libmozglue.so`）属于预期：它们是 Gecko 引擎，不是 Chromium。版本、Maven 坐标、Android 要求、安全 API 与许可证来源见 [`docs/GECKOVIEW-OFFICIAL-RESEARCH.md`](docs/GECKOVIEW-OFFICIAL-RESEARCH.md)。
 
@@ -28,11 +28,17 @@ GeckoView 配置为 HTTPS-only，并设置 `TRR_MODE_ONLY` 与 Quad9 DoH 地址 
 
 Quad9 的[数据与隐私政策](https://quad9.net/privacy/policy/)（版本 1.1，2026-06-24）称，服务必须在内存中短暂处理回复地址后即删除，不记录用户 IP；该政策也允许保留长期聚合计数，其中可能含查询标签及首次/最近时间，并说明它不会把这些数据关联到单个用户。查询域名仍会交给 Quad9 解析；DoH 是传输加密，不是匿名化。政策范围和元数据边界见 [`docs/NETWORK-PRIVACY-AUDIT.md`](docs/NETWORK-PRIVACY-AUDIT.md) 与 [`docs/QUAD9-DATA-BOUNDARY.md`](docs/QUAD9-DATA-BOUNDARY.md)。
 
-WebRTC PeerConnection 防护默认开启：应用通过 Mozilla 标记为 **Experimental** 的 `GeckoPreferenceController` 请求关闭 `media.peerconnection.enabled`。若偏好设置 API 返回失败，应用会关闭网页 JavaScript 作为 fail-closed 回退；成功返回也不等于真机 ICE 流量已验证。网页媒体、Android 权限请求始终拒绝，且应用不申请摄像头/麦克风权限。该设置不是网络层 UDP 隔离，不承诺零 WebRTC/IP 泄漏。
+WebRTC PeerConnection 防护默认开启：应用通过 Mozilla 标记为 **Experimental** 的 `GeckoPreferenceController` 请求关闭 `media.peerconnection.enabled`。若偏好设置 API 返回失败，应用会关闭网页 JavaScript 作为 fail-closed 回退；成功返回也不等于真机 ICE 流量已验证。应用声明可选摄像头、麦克风和位置权限，但只读取 Android 当前授权状态，从不主动调用危险权限运行时申请 API。用户须到系统“设置 > 应用 > 简浏览 > 权限”手动授予；缺少权限时相关网页请求会被拒绝并提示，普通浏览继续。系统授权后，网站仍需单独确认。该设置不是网络层 UDP 隔离，不承诺零 WebRTC/IP 泄漏。
 
 可选 DNS-only VPN 是独立实验原型，需 Android 显示系统授权；它只尝试处理发往指定 DNS resolver 地址的端口 53 流量，不接管通用流量。VPN 图标或 DoH 请求成功都不能证明 GeckoView 的 DNS 已进入该隧道。没有访问公网 DNS/WebRTC 泄漏检测站，也没有向 Quad9 发送测试查询；DoH 测试使用 loopback HTTPS mock。
 
 受控抓取器单独使用 Android Java HTTP(S) 连接和系统名称解析，不继承 GeckoView 的 Quad9 TRR-only 配置，也不保证经过 DNS-only VPN；输入页和每次重定向会校验 HTTPS/同源范围，并拒绝可识别的本机、私有和特殊用途 IP 地址。DNS 预检与连接之间仍存在系统解析/时间差边界，因此 UI 不声称同等 DNS 隐私。robots.txt 是抓取规则而不是访问授权；公开可读也不自动授予复制或再发布权。规范与实际行为及尚未覆盖的页面类型见 [`docs/CRAWLER-IMPLEMENTATION-REPORT.md`](docs/CRAWLER-IMPLEMENTATION-REPORT.md)。
+
+## 手动 Android 权限与设备能力
+
+摄像头、麦克风和定位是可选的危险权限，只在 APK Manifest 中声明，不由应用主动申请或弹出 Android 授权框。camera、camera.any、autofocus 和 microphone 硬件特性也明确设为非必需，避免 Android/Google Play 因权限声明过滤无相应硬件的设备。用户须到“设置 > 应用 > 简浏览 > 权限”手动授予；缺少权限或对应媒体硬件时，相关网页请求会被拒绝，普通浏览继续。完成系统授权后，网页媒体或定位请求还会出现独立的站点确认。GeckoView 会保存站点决定；本版没有单独的逐站权限管理页，用户可随时在 Android 应用权限中撤销对应的应用级授权。
+
+选择壁纸、网页上传文件或导入扩展 ZIP 使用 Android 系统文档选择器的单项 URI 授权，不申请 `READ_MEDIA_*` 或广泛存储权限。Android 没有可在“应用权限”中单独授予的常规剪贴板运行时权限；复制/粘贴依赖系统与 GeckoView 集成及 Android 前台访问规则。项目 Android 层没有 `SensorManager` 调用，不实现步数/活动识别或心率等身体传感器功能，因而不声明 `ACTIVITY_RECOGNITION`、`BODY_SENSORS` 或 `BODY_SENSORS_BACKGROUND`。普通加速度计/陀螺仪不应误归为身体传感器权限；GeckoView 网页运动传感器接口未在设备上验证，不作支持承诺。屏幕捕获和未在支持清单内的 GeckoView 权限请求会被拒绝。详细核对见 [`docs/MANUAL-PERMISSIONS-AND-SENSORS.md`](docs/MANUAL-PERMISSIONS-AND-SENSORS.md)。
 
 GeckoView 官方许可为 MPL-2.0，构建依赖还包括 Apache-2.0 组件。许可证文本与第三方通知随 APK 提供。GeckoView 对应源码获取链接与再分发说明见上述官方资料记录及 APK 内 `THIRD-PARTY-NOTICES.txt`；Mozilla 与 GeckoView 均不对本项目品牌作背书。
 

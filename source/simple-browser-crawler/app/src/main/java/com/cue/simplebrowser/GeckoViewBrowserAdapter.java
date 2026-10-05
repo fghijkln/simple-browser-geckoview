@@ -1,6 +1,7 @@
 package com.cue.simplebrowser;
 
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -25,6 +26,8 @@ import org.mozilla.geckoview.WebResponse;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
@@ -69,6 +72,12 @@ final class GeckoViewBrowserAdapter {
         void onDownload(WebResponse response);
     }
 
+    interface PermissionPromptHandler {
+        void onSystemPermissionBlocked(String permissionLabel, String origin);
+        void onUnsupportedPermissionRequest(String origin);
+        void requestSitePermission(String permissionLabel, String origin, Consumer<Boolean> decision);
+    }
+
     interface RenderProcessTerminatedListener {
         void onTerminated(int status, int errorCode);
     }
@@ -102,6 +111,7 @@ final class GeckoViewBrowserAdapter {
     private volatile LoadHandler loadHandler;
     private volatile PopupHandler popupHandler;
     private volatile DownloadHandler downloadHandler;
+    private volatile PermissionPromptHandler permissionPromptHandler;
     private volatile RenderProcessTerminatedListener renderProcessTerminatedListener;
 
     static void initializeRuntime(Context context, String profileDirectory,
@@ -275,14 +285,53 @@ final class GeckoViewBrowserAdapter {
             @Override
             public void onAndroidPermissionsRequest(GeckoSession ignored, String[] permissions,
                     GeckoSession.PermissionDelegate.Callback permissionCallback) {
-                permissionCallback.reject();
+                if (!hasOnlySupportedAndroidPermissions(permissions)) {
+                    PermissionPromptHandler handler = permissionPromptHandler;
+                    if (handler != null) handler.onUnsupportedPermissionRequest(displayOrigin(currentUrl));
+                    permissionCallback.reject();
+                    return;
+                }
+                String missing = missingAndroidPermissionLabel(permissions);
+                if (missing != null) {
+                    notifySystemPermissionBlocked(missing, currentUrl);
+                    permissionCallback.reject();
+                    return;
+                }
+                permissionCallback.grant();
             }
 
+            @OptIn(markerClass = ExperimentalGeckoViewApi.class)
             @Override
             public GeckoResult<Integer> onContentPermissionRequest(
                     GeckoSession ignored, GeckoSession.PermissionDelegate.ContentPermission permission) {
-                return GeckoResult.fromValue(
-                        GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+                if (permission.permission != GeckoSession.PermissionDelegate.PERMISSION_GEOLOCATION) {
+                    PermissionPromptHandler handler = permissionPromptHandler;
+                    if (handler != null) handler.onUnsupportedPermissionRequest(displayOrigin(permission.uri));
+                    return GeckoResult.fromValue(
+                            GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+                }
+                if (!hasLocationPermission()) {
+                    notifySystemPermissionBlocked(appContext.getString(R.string.browser_permission_location),
+                            permission.uri);
+                    return GeckoResult.fromValue(
+                            GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+                }
+                if (permission.value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+                        || permission.value == GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY) {
+                    return GeckoResult.fromValue(permission.value);
+                }
+                PermissionPromptHandler handler = permissionPromptHandler;
+                if (handler == null) {
+                    return GeckoResult.fromValue(
+                            GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY);
+                }
+                GeckoResult<Integer> result = new GeckoResult<>();
+                permission.notifyShown();
+                handler.requestSitePermission(appContext.getString(R.string.browser_permission_location),
+                        displayOrigin(permission.uri), allowed -> result.complete(allowed
+                                ? GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+                                : GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY));
+                return result;
             }
 
             @Override
@@ -290,7 +339,45 @@ final class GeckoViewBrowserAdapter {
                     GeckoSession.PermissionDelegate.MediaSource[] video,
                     GeckoSession.PermissionDelegate.MediaSource[] audio,
                     GeckoSession.PermissionDelegate.MediaCallback mediaCallback) {
-                mediaCallback.reject();
+                GeckoSession.PermissionDelegate.MediaSource videoSource = firstMediaSource(video,
+                        GeckoSession.PermissionDelegate.MediaSource.SOURCE_CAMERA);
+                GeckoSession.PermissionDelegate.MediaSource audioSource = firstMediaSource(audio,
+                        GeckoSession.PermissionDelegate.MediaSource.SOURCE_MICROPHONE);
+                if ((video != null && videoSource == null) || (audio != null && audioSource == null)
+                        || (video == null && audio == null)) {
+                    PermissionPromptHandler handler = permissionPromptHandler;
+                    if (handler != null) handler.onUnsupportedPermissionRequest(displayOrigin(uri));
+                    mediaCallback.reject();
+                    return;
+                }
+                if ((video != null && !appContext.getPackageManager()
+                        .hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY))
+                        || (audio != null && !appContext.getPackageManager()
+                        .hasSystemFeature(PackageManager.FEATURE_MICROPHONE))) {
+                    PermissionPromptHandler handler = permissionPromptHandler;
+                    if (handler != null) handler.onUnsupportedPermissionRequest(displayOrigin(uri));
+                    mediaCallback.reject();
+                    return;
+                }
+                String missing = missingMediaPermissionLabel(video != null, audio != null);
+                if (missing != null) {
+                    notifySystemPermissionBlocked(missing, uri);
+                    mediaCallback.reject();
+                    return;
+                }
+                PermissionPromptHandler handler = permissionPromptHandler;
+                if (handler == null) {
+                    mediaCallback.reject();
+                    return;
+                }
+                String capability = video != null && audio != null
+                        ? appContext.getString(R.string.browser_permission_camera_microphone)
+                        : video != null ? appContext.getString(R.string.browser_permission_camera)
+                        : appContext.getString(R.string.browser_permission_microphone);
+                handler.requestSitePermission(capability, displayOrigin(uri), allowed -> {
+                    if (allowed) mediaCallback.grant(videoSource, audioSource);
+                    else mediaCallback.reject();
+                });
             }
         });
         session.setNavigationDelegate(new GeckoSession.NavigationDelegate() {
@@ -425,6 +512,95 @@ final class GeckoViewBrowserAdapter {
         if (listener != null) listener.onLoadingStateChanged(false, canGoBack, canGoForward);
     }
 
+    private boolean hasAndroidPermission(String permission) {
+        return appContext.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasLocationPermission() {
+        return hasAndroidPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                || hasAndroidPermission(android.Manifest.permission.ACCESS_FINE_LOCATION);
+    }
+
+    private static boolean hasOnlySupportedAndroidPermissions(String[] permissions) {
+        if (permissions == null) return true;
+        for (String permission : permissions) {
+            if (!android.Manifest.permission.ACCESS_COARSE_LOCATION.equals(permission)
+                    && !android.Manifest.permission.ACCESS_FINE_LOCATION.equals(permission)
+                    && !android.Manifest.permission.CAMERA.equals(permission)
+                    && !android.Manifest.permission.RECORD_AUDIO.equals(permission)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String missingAndroidPermissionLabel(String[] permissions) {
+        if (permissions == null || permissions.length == 0) return null;
+        Set<String> missing = new LinkedHashSet<>();
+        for (String permission : permissions) {
+            if (android.Manifest.permission.ACCESS_COARSE_LOCATION.equals(permission)) {
+                if (!hasAndroidPermission(permission)) {
+                    missing.add(appContext.getString(R.string.browser_permission_location_approximate));
+                }
+            } else if (android.Manifest.permission.ACCESS_FINE_LOCATION.equals(permission)) {
+                if (!hasAndroidPermission(permission)) {
+                    missing.add(appContext.getString(R.string.browser_permission_location_precise));
+                }
+            } else if (android.Manifest.permission.CAMERA.equals(permission)) {
+                if (!hasAndroidPermission(permission)) {
+                    missing.add(appContext.getString(R.string.browser_permission_camera));
+                }
+            } else if (android.Manifest.permission.RECORD_AUDIO.equals(permission)) {
+                if (!hasAndroidPermission(permission)) {
+                    missing.add(appContext.getString(R.string.browser_permission_microphone));
+                }
+            } else {
+                missing.add(appContext.getString(R.string.browser_permission_unsupported));
+            }
+        }
+        return missing.isEmpty() ? null : String.join("、", missing);
+    }
+
+    private String missingMediaPermissionLabel(boolean needsCamera, boolean needsMicrophone) {
+        boolean cameraMissing = needsCamera && !hasAndroidPermission(android.Manifest.permission.CAMERA);
+        boolean microphoneMissing = needsMicrophone
+                && !hasAndroidPermission(android.Manifest.permission.RECORD_AUDIO);
+        if (cameraMissing && microphoneMissing) {
+            return appContext.getString(R.string.browser_permission_camera_microphone);
+        }
+        if (cameraMissing) return appContext.getString(R.string.browser_permission_camera);
+        if (microphoneMissing) return appContext.getString(R.string.browser_permission_microphone);
+        return null;
+    }
+
+    private static GeckoSession.PermissionDelegate.MediaSource firstMediaSource(
+            GeckoSession.PermissionDelegate.MediaSource[] sources, int expectedSource) {
+        if (sources == null) return null;
+        for (GeckoSession.PermissionDelegate.MediaSource source : sources) {
+            if (source != null && source.source == expectedSource) return source;
+        }
+        return null;
+    }
+
+    private void notifySystemPermissionBlocked(String permissionLabel, String uri) {
+        PermissionPromptHandler handler = permissionPromptHandler;
+        if (handler != null) handler.onSystemPermissionBlocked(permissionLabel, displayOrigin(uri));
+    }
+
+    private static String displayOrigin(String uriText) {
+        if (uriText == null || uriText.trim().isEmpty()) return "未知网站";
+        try {
+            Uri uri = Uri.parse(uriText);
+            String host = uri.getHost();
+            if (host == null || host.isEmpty()) return "未知网站";
+            String displayHost = host.indexOf(':') >= 0 ? "[" + host + "]" : host;
+            int port = uri.getPort();
+            return port < 0 ? displayHost : displayHost + ":" + port;
+        } catch (RuntimeException ignored) {
+            return "未知网站";
+        }
+    }
+
     private void notifyRenderProcessTerminated() {
         RenderProcessTerminatedListener listener = renderProcessTerminatedListener;
         if (listener != null) listener.onTerminated(0, 0);
@@ -438,8 +614,8 @@ final class GeckoViewBrowserAdapter {
         session.getSettings().setAllowJavascript(enabled);
     }
 
-    void setPermissionHandler(Object ignored) {
-        // Site and media permissions are denied unconditionally by the native delegate.
+    void setPermissionHandler(PermissionPromptHandler handler) {
+        permissionPromptHandler = handler;
     }
 
     FrameLayout getSurfaceContainer() {

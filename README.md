@@ -1,19 +1,19 @@
 # 简浏览 / Simple Browser (Android)
 
-**对外发布版本：v0.2** · **应用内部版本：2.4.0（versionCode 13）**  
-**Public release: v0.2** · **Application version: 2.4.0 (versionCode 13)**
+**对外发布版本：v0.3** · **应用内部版本：2.5.0（versionCode 14）**
+**Public release: v0.3** · **Application version: 2.5.0 (versionCode 14)**
 
-简浏览是一款简体中文 Android 浏览器，使用 Mozilla GeckoView Stable `157.0.20260924084938`。本次检查的 APK 中未发现 Chromium 或 CEF；`libxul.so`、`libmozglue.so` 等是 GeckoView 的 Mozilla 引擎组件。上一公开版本为 [v0.1（应用版本 2.3.0 / versionCode 12）](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.1)，其标签与发行资产保留不变。
+简浏览是一款简体中文 Android 浏览器，使用 Mozilla GeckoView Stable `157.0.20260924084938`。本次检查的 APK 中未发现 Chromium 或 CEF；`libxul.so`、`libmozglue.so` 等是 GeckoView 的 Mozilla 引擎组件。上一公开版本为 [v0.2（应用版本 2.4.0 / versionCode 13）](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.2)，其标签与发行资产保留不变。
 
-Simple Browser is a Simplified Chinese Android browser built on Mozilla GeckoView Stable `157.0.20260924084938`. The inspected APKs contain no Chromium or CEF; `libxul.so` and `libmozglue.so` are Mozilla GeckoView engine components. The previous public release was [v0.1 (application version 2.3.0 / versionCode 12)](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.1); its tag and release assets remain unchanged.
+Simple Browser is a Simplified Chinese Android browser built on Mozilla GeckoView Stable `157.0.20260924084938`. The inspected APKs contain no Chromium or CEF; `libxul.so` and `libmozglue.so` are Mozilla GeckoView engine components. The previous public release was [v0.2 (application version 2.4.0 / versionCode 13)](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.2); its tag and release assets remain unchanged.
 
 ## 下载 / Downloads
 
-- [arm64-v8a APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.2/SimpleBrowser-2.4.0-arm64-v8a.apk)
-- [x86_64 APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.2/SimpleBrowser-2.4.0-x86_64.apk)
-- [源码与测试 ZIP](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.2/SimpleBrowser-2.4.0-source-and-tests.zip) · 建议仓库源码目录：[source/simple-browser-crawler/](source/simple-browser-crawler/)
+- [arm64-v8a APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.3/SimpleBrowser-2.5.0-arm64-v8a.apk)
+- [x86_64 APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.3/SimpleBrowser-2.5.0-x86_64.apk)
+- [源码与测试 ZIP](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.3/SimpleBrowser-2.5.0-source-and-tests.zip) · 仓库源码：[source/simple-browser-crawler/](source/simple-browser-crawler/)
 
-These are ABI-specific APKs; there is no universal APK. Minimum Android API is 29 and target API is 35. SHA-256 values for the v0.2 release assets are listed in [`checksums.txt`](checksums.txt).
+These are ABI-specific APKs; there is no universal APK. Minimum Android API is 29 and target API is 35. SHA-256 values for the v0.3 release assets are listed in [`checksums.txt`](checksums.txt).
 
 ## 功能与技术
 
@@ -22,7 +22,8 @@ These are ABI-specific APKs; there is no universal APK. Minimum Android API is 2
 - 菜单中另有独立的**受控网页抓取第二信息源**：从用户主动输入的公开 HTTPS 页面及同源链接抽取静态文本；上限为每项任务 4 页、90 秒、每页 1 MiB，串行请求至少间隔 2 秒。抓取器不是通用搜索引擎，也不承诺绕过反爬或访问限制；细节见 [`source/simple-browser-crawler/docs/CRAWLER-IMPLEMENTATION-REPORT.md`](source/simple-browser-crawler/docs/CRAWLER-IMPLEMENTATION-REPORT.md)。
 - 新标签页提供 14 张离线壁纸；可选择本机照片并设置每日轮换。电脑版请求模式只更改 GeckoView User-Agent，不模拟桌面视口。
 - 本地环境管理器可创建、切换、改名、查看配置摘要和删除环境；切换会关闭当前标签。历史、书签和请求模式按环境保存。扩展 ZIP 仅供导入、查看声明和移除；Firefox 扩展运行时未实现，扩展代码不会执行。
-- 隐私设置采用 GeckoView 原生 Strict Tracking Protection、HTTPS-only，以及 Quad9 TRR-only：`https://dns.quad9.net/dns-query`。可选 DNS-only VPN 原型需要 Android 系统授权；它不是通用流量 VPN。
+- 隐私设置采用 GeckoView 原生 Strict Tracking Protection、HTTPS-only，以及 Quad9 TRR-only：`https://dns.quad9.net/dns-query`。可选 DNS-only VPN 原型需要用户主动触发 Android 系统授权；它不是通用流量 VPN。
+- 摄像头、麦克风与定位为可选权限：应用只在 Manifest 声明，由用户去 Android 系统设置手动授予；应用不主动弹运行时授权框。摄像头、自动对焦和麦克风硬件特性显式设为非必需，因此无这些硬件仍可安装并进行基础浏览；缺少授权或硬件时只拒绝对应媒体请求，普通浏览继续；授予后仍须逐站确认。照片/文件选择使用系统文档选择器，不读取整个媒体库。详情见[`双语发行说明`](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.3)与随包源码权限文档。
 
 ## 受控抓取范围与限制
 
@@ -58,15 +59,15 @@ GeckoView 官方许可为 MPL-2.0，构建依赖还包括 Apache-2.0 组件；�
 
 # Simple Browser (Android)
 
-**Public release: v0.2** · **Application version: 2.4.0 (versionCode 13)**
+**Public release: v0.3** · **Application version: 2.5.0 (versionCode 14)**
 
 ## Downloads
 
-- [arm64-v8a APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.2/SimpleBrowser-2.4.0-arm64-v8a.apk)
-- [x86_64 APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.2/SimpleBrowser-2.4.0-x86_64.apk)
-- [Source and tests ZIP](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.2/SimpleBrowser-2.4.0-source-and-tests.zip) · proposed source tree: [`source/simple-browser-crawler/`](source/simple-browser-crawler/)
+- [arm64-v8a APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.3/SimpleBrowser-2.5.0-arm64-v8a.apk)
+- [x86_64 APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.3/SimpleBrowser-2.5.0-x86_64.apk)
+- [Source and tests ZIP](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.3/SimpleBrowser-2.5.0-source-and-tests.zip) · proposed source tree: [`source/simple-browser-crawler/`](source/simple-browser-crawler/)
 
-These are ABI-specific APKs; there is no universal APK. Minimum Android API is 29 and target API is 35. SHA-256 values for the v0.2 assets are listed in [`checksums.txt`](checksums.txt). The previous public release was [v0.1 (application version 2.3.0 / versionCode 12)](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.1); its tag and release assets remain unchanged.
+These are ABI-specific APKs; there is no universal APK. Minimum Android API is 29 and target API is 35. SHA-256 values for the v0.3 assets are listed in [`checksums.txt`](checksums.txt). The previous public release was [v0.2 (application version 2.4.0 / versionCode 13)](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.2); its tag and release assets remain unchanged.
 
 ## Features and stack
 
@@ -75,7 +76,12 @@ These are ABI-specific APKs; there is no universal APK. Minimum Android API is 2
 - A separate **controlled page-crawling second source** is available from the menu. It extracts static text from a user-entered public HTTPS page and same-origin links, with hard limits of 4 pages, 90 seconds per task, 1 MiB per page, and serial requests at least 2 seconds apart. It is not a general-purpose search engine and does not promise to bypass anti-crawling or access restrictions. See [`source/simple-browser-crawler/docs/CRAWLER-IMPLEMENTATION-REPORT.md`](source/simple-browser-crawler/docs/CRAWLER-IMPLEMENTATION-REPORT.md).
 - The new-tab page has 14 offline wallpapers, with local photo selection and daily rotation. Desktop-request mode changes only the GeckoView User-Agent; it does not emulate a desktop viewport.
 - A local profile manager can create, switch, rename, inspect a configuration summary for, and remove environments; switching closes the current tabs. History, bookmarks, and request mode are profile-specific. Extension ZIPs can be imported for inspection and removed, but the Firefox extension runtime is not implemented and extension code is not executed.
-- Privacy settings use GeckoView's native Strict Tracking Protection, HTTPS-only mode, and Quad9 TRR-only at `https://dns.quad9.net/dns-query`. An optional DNS-only VPN prototype requires Android system authorization; it is not a general-purpose traffic VPN.
+- Privacy settings use GeckoView's native Strict Tracking Protection, HTTPS-only mode, and Quad9 TRR-only at `https://dns.quad9.net/dns-query`. An optional DNS-only VPN prototype requires user-triggered Android system authorization; it is not a general-purpose traffic VPN.
+- Camera, microphone, and location permissions are optional and manually granted in Android Settings. The app never opens a dangerous runtime-permission request; without a grant, only the relevant sensitive website request is denied and normal browsing remains available. Camera, autofocus, and microphone hardware features are explicitly optional, so devices without those peripherals remain installable for basic browsing. A separate site-consent prompt appears after an OS grant. Photo/file selection uses Android's system document picker, not broad media-library access. See the [bilingual v0.3 release notes](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.3) and the source permission audit.
+
+## Manual app permissions and device capabilities
+
+To use website camera, microphone, or geolocation features, manually enable the corresponding app permission under **Android Settings > Apps > Simple Browser > Permissions**. Missing permissions are checked and denied without an OS runtime prompt. Camera, autofocus, and microphone hardware features are explicitly optional, so the app remains installable on devices without those peripherals. Website consent remains a separate GeckoView decision. Android's document picker grants access only to the user-selected file URI, so no broad media permission is needed. Android has no ordinary app-permissions toggle for clipboard access. This app does not implement step/activity recognition or health/body sensors; it does not declare `ACTIVITY_RECOGNITION` or `BODY_SENSORS`. Ordinary accelerometer and gyroscope use should not be mislabeled as requiring those permissions. GeckoView web motion-sensor behavior has not been device-tested and is not promised. The optional DNS-only VPN is a separate, user-triggered system authorization flow.
 
 ## Crawler scope and limitations
 

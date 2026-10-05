@@ -58,4 +58,5 @@ javac -encoding UTF-8 -d "$TMP/classes" \
     "$ROOT/app/src/main/res/drawable-nodpi/new_tab_wallpaper.png"
   java -cp "$TMP/classes" com.cue.simplebrowser.WallpaperPickerFlowSmokeTest
   java -cp "$TMP/classes" com.cue.simplebrowser.OverflowActionDispatcherSmokeTest
+  python3 "$ROOT/tools/manual_permission_policy_smoke.py"
 } 2>&1 | tee "$RESULTS/geckoview-local-tests.log"

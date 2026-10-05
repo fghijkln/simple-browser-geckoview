@@ -72,6 +72,7 @@ import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -1704,6 +1705,13 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         webRtcDisclosureParams.topMargin = dp(7);
         sheet.addView(webRtcDisclosure, webRtcDisclosureParams);
+        TextView permissionDisclosure = label(getString(R.string.browser_permission_disclosure),
+                10, SECONDARY, false);
+        permissionDisclosure.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams permissionDisclosureParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        permissionDisclosureParams.topMargin = dp(7);
+        sheet.addView(permissionDisclosure, permissionDisclosureParams);
         TextView dnsVpnDisclosure = label(getString(R.string.dns_vpn_disclosure), 10, SECONDARY, false);
         dnsVpnDisclosure.setLineSpacing(dp(2), 1f);
         LinearLayout.LayoutParams dnsVpnDisclosureParams = new LinearLayout.LayoutParams(
@@ -2060,6 +2068,33 @@ public final class MainActivity extends Activity {
             return null;
         });
         browser.setDownloadHandler(response -> handleGeckoDownload(session, response));
+        browser.setPermissionHandler(new GeckoViewBrowserAdapter.PermissionPromptHandler() {
+            @Override
+            public void onSystemPermissionBlocked(String permissionLabel, String origin) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    Toast.makeText(MainActivity.this,
+                            getString(R.string.browser_permission_missing_system, origin, permissionLabel),
+                            Toast.LENGTH_LONG).show();
+                });
+            }
+
+            @Override
+            public void onUnsupportedPermissionRequest(String origin) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    Toast.makeText(MainActivity.this,
+                            getString(R.string.browser_permission_not_supported, origin),
+                            Toast.LENGTH_LONG).show();
+                });
+            }
+
+            @Override
+            public void requestSitePermission(String permissionLabel, String origin,
+                                              Consumer<Boolean> decision) {
+                requestBrowserSitePermission(permissionLabel, origin, decision);
+            }
+        });
         browser.setLoadHandler(new GeckoViewBrowserAdapter.LoadHandler() {
             @Override
             public void onLoadStart(String url) {
@@ -2147,6 +2182,32 @@ public final class MainActivity extends Activity {
             tab.progress = 0;
             renderActiveTab();
         }));
+    }
+
+    private void requestBrowserSitePermission(String permissionLabel, String origin,
+                                              Consumer<Boolean> decision) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) {
+                decision.accept(false);
+                return;
+            }
+            boolean[] decided = {false};
+            Consumer<Boolean> respondOnce = allowed -> {
+                if (decided[0]) return;
+                decided[0] = true;
+                decision.accept(allowed);
+            };
+            new android.app.AlertDialog.Builder(MainActivity.this)
+                    .setTitle(R.string.browser_site_permission_title)
+                    .setMessage(getString(R.string.browser_site_permission_message,
+                            origin, permissionLabel))
+                    .setPositiveButton(R.string.browser_site_permission_allow,
+                            (dialog, which) -> respondOnce.accept(true))
+                    .setNegativeButton(R.string.browser_site_permission_deny,
+                            (dialog, which) -> respondOnce.accept(false))
+                    .setOnCancelListener(dialog -> respondOnce.accept(false))
+                    .show();
+        });
     }
 
     private void handleGeckoDownload(BrowserTabSession session, WebResponse response) {

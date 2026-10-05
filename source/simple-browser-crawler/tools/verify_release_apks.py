@@ -82,7 +82,7 @@ def main():
         badging = run([AAPT, "dump", "badging", apk])
         package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging, re.M)
         assert package, "aapt did not report package/version"
-        assert package.groups() == ("com.cue.simplebrowser", "13", "2.4.0"), f"Unexpected app metadata: {package.groups()}"
+        assert package.groups() == ("com.cue.simplebrowser", "14", "2.5.0"), f"Unexpected app metadata: {package.groups()}"
         abi_badging = re.search(r"^native-code: (.*)$", badging, re.M)
         assert abi_badging and expected_abi in abi_badging.group(1), f"aapt ABI mismatch for {apk.name}"
         align = run([ZIPALIGN, "-c", "-p", "4", apk])
