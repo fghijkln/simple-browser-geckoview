@@ -1,0 +1,25 @@
+APK directory: /workspace/browser-web-debug-release-draft/build/app/outputs/apk/release
+
+APK: /workspace/browser-web-debug-release-draft/build/app/outputs/apk/release/app-arm64-v8a-release.apk
+Size bytes: 218730367
+SHA-256: 6d3eed9b83f43a5ef7498063c82fbcabfef919e9be745dbe15d4f20a8cd616b5
+Package/version: com.cue.simplebrowser 2.8.1 (versionCode 18)
+ABI: arm64-v8a
+Signing certificate SHA-256: e82931a4c130f749fe03fa6f6b530007d03a7b00f003aea47cdc3d0f69e28dfd (v0.4-compatible Android Debug key)
+Signature schemes: Verified using v1 scheme (JAR signing): false; Verified using v2 scheme (APK Signature Scheme v2): false; Verified using v3 scheme (APK Signature Scheme v3): true; Verified using v3.1 scheme (APK Signature Scheme v3.1): false; Verified using v3.2 scheme (APK Signature Scheme v3.2): false; Verified using v4 scheme (APK Signature Scheme v4): false
+ZIP alignment: 4-byte native alignment PASS; 16-KB page alignment PASS
+Mozilla Gecko native libraries (13): libclearkey.so, libcrashhelper.so, libcrashtools.so, libfreebl3.so, libgkcodecs.so, liblgpllibs.so, libmozavcodec.so, libmozavutil.so, libmozglue.so, libnss3.so, libplugin-container.so, libsoftokn3.so, libxul.so
+DEX files: classes.dex, classes2.dex
+Chromium/CEF DEX/native marker scan: no matches
+
+APK: /workspace/browser-web-debug-release-draft/build/app/outputs/apk/release/app-x86_64-release.apk
+Size bytes: 238093720
+SHA-256: 05e56d772796cb2fd8569ab2087a81f0d7d6995f36250b936f12839e08d0f6ba
+Package/version: com.cue.simplebrowser 2.8.1 (versionCode 18)
+ABI: x86_64
+Signing certificate SHA-256: e82931a4c130f749fe03fa6f6b530007d03a7b00f003aea47cdc3d0f69e28dfd (v0.4-compatible Android Debug key)
+Signature schemes: Verified using v1 scheme (JAR signing): false; Verified using v2 scheme (APK Signature Scheme v2): false; Verified using v3 scheme (APK Signature Scheme v3): true; Verified using v3.1 scheme (APK Signature Scheme v3.1): false; Verified using v3.2 scheme (APK Signature Scheme v3.2): false; Verified using v4 scheme (APK Signature Scheme v4): false
+ZIP alignment: 4-byte native alignment PASS; 16-KB page alignment PASS
+Mozilla Gecko native libraries (13): libclearkey.so, libcrashhelper.so, libcrashtools.so, libfreebl3.so, libgkcodecs.so, liblgpllibs.so, libmozavcodec.so, libmozavutil.so, libmozglue.so, libnss3.so, libplugin-container.so, libsoftokn3.so, libxul.so
+DEX files: classes.dex, classes2.dex
+Chromium/CEF DEX/native marker scan: no matches

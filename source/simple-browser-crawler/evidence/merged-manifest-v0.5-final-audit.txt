@@ -1,0 +1,13 @@
+Final v0.5 / application 2.8.1 (versionCode 18) merged-Manifest audit
+
+Reference APKs: v0.4 / application 2.6.0 arm64-v8a and x86_64 from the local copy of the published release.
+Candidate APKs: SimpleBrowser-2.8.1-arm64-v8a.apk and SimpleBrowser-2.8.1-x86_64.apk.
+
+Results for both ABIs:
+- `aapt dump permissions` requested-permission output is identical to the matching v0.4 APK: 11 entries, including AndroidX's signature-protected `com.cue.simplebrowser.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
+- Full `aapt dump xmltree <apk> AndroidManifest.xml` output compares identical to v0.4 after normalizing only the expected `versionCode` and `versionName` fields. Every remaining merged Manifest element, attribute, and component is identical.
+- Release APK package/version metadata is `com.cue.simplebrowser`, version `2.8.1`, versionCode `18`; each package contains only its target ABI. `aapt dump badging` reports no `application-debuggable` flag.
+- The candidate source `app/src/main/AndroidManifest.xml` and `BrowserPrivilegeGuard.java` compare byte-for-byte equal to the source at remote baseline commit `5738a77a3e4b9b22b6c4437f266a5fb053d2b8fa` (`v0.4`).
+- No Android permission, app component, or privilege-guard behavior was added or changed. The web Console's all-site HTTP(S) host permission is an opt-in GeckoView WebExtension host permission, not an Android Manifest permission.
+
+Source command records are in `build-lint-release.log`, `apk-verification-final.txt`, `candidate-arm64-v8a-permissions.txt`, `candidate-x86_64-permissions.txt`, and `manifest-diff-arm64-v8a.txt` / `manifest-diff-x86_64.txt`, all under this `evidence/` directory. The release-candidate final source tree and APK signatures have been independently checked against v0.4.

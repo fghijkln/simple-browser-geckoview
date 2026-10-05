@@ -15,6 +15,8 @@ import java.util.List;
 /** Runs in a separate app process so GeckoView can be re-created with a new -profile argument. */
 public final class ProfileRestartActivity extends Activity {
     static final String EXTRA_OLD_PID = "com.cue.simplebrowser.extra.OLD_GECKO_PID";
+    static final String EXTRA_RESTART_STATE = "com.cue.simplebrowser.extra.RESTART_STATE";
+    static final String EXTRA_DEBUG_RESTART = "com.cue.simplebrowser.extra.DEBUG_RESTART";
     private static final long MAX_WAIT_MS = 15000L;
     private static final long POLL_INTERVAL_MS = 100L;
     private static final long SETTLE_DELAY_MS = 500L;
@@ -32,7 +34,9 @@ public final class ProfileRestartActivity extends Activity {
         status.setGravity(Gravity.CENTER);
         status.setTextSize(17);
         status.setPadding(32, 32, 32, 32);
-        status.setText("正在安全关闭旧浏览会话并切换环境…");
+        status.setText(getIntent().getBooleanExtra(EXTRA_DEBUG_RESTART, false)
+                ? "正在重启浏览引擎以应用调试设置…"
+                : "正在安全关闭旧浏览会话并切换环境…");
         setContentView(status);
         oldPid = getIntent().getIntExtra(EXTRA_OLD_PID, -1);
         startedAt = SystemClock.elapsedRealtime();
@@ -70,6 +74,10 @@ public final class ProfileRestartActivity extends Activity {
     private void launchBrowser() {
         if (isFinishing()) return;
         Intent intent = new Intent(this, MainActivity.class);
+        Bundle restartState = getIntent().getBundleExtra(EXTRA_RESTART_STATE);
+        if (restartState != null) {
+            intent.putExtra(EXTRA_RESTART_STATE, restartState);
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         startActivity(intent);
         finish();

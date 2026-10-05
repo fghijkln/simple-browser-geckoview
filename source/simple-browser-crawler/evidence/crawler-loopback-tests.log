@@ -1,0 +1,1 @@
+PASS: loopback-only controlled crawler mock; robots, same-origin, no-cookie, denial/challenge/429, redirect and byte bounds, and cancellation

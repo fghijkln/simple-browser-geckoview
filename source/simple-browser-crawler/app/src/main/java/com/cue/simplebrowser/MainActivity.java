@@ -35,6 +35,7 @@ import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
+import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.HorizontalScrollView;
@@ -66,6 +67,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Date;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.TimeZone;
@@ -95,14 +98,8 @@ public final class MainActivity extends Activity {
     private static final String STATE_TAB_URL_PREFIX = "simple-browser.tabs.url.";
     private static final String STATE_TAB_TITLE_PREFIX = "simple-browser.tabs.title.";
     private static final String STATE_TAB_HOME_PREFIX = "simple-browser.tabs.home.";
+    private static final String STATE_CONSOLE_PANEL_OPEN = "simple-browser.console.panel.open";
     private static final String SEARCH_PREFERENCES = "simple-browser.preferences";
-    private static final String WALLPAPER_URI_PREFERENCE = "new-tab-wallpaper-uri";
-    private static final String WALLPAPER_LOCAL_COPY_PREFERENCE = "new-tab-wallpaper-local-copy";
-    private static final String WALLPAPER_LOCAL_COPY_FILE = "selected-new-tab-wallpaper.png";
-    private static final String WALLPAPER_BUNDLED_ID_PREFERENCE = "new-tab-wallpaper-bundled-id";
-    private static final String WALLPAPER_AUTO_PREFERENCE = "new-tab-wallpaper-daily-auto";
-    private static final String WALLPAPER_AUTO_DATE_PREFERENCE = "new-tab-wallpaper-auto-date";
-    private static final String WALLPAPER_LAST_AUTO_ID_PREFERENCE = "new-tab-wallpaper-last-auto-id";
     private static final String SEARCH_ENGINE_PREFERENCE = "search-engine";
     private static final String HISTORY_PREFERENCE = "browser-history-v1";
     private static final String BOOKMARKS_PREFERENCE = "browser-bookmarks-v1";
@@ -110,9 +107,7 @@ public final class MainActivity extends Activity {
     private static final String CUSTOM_ENGINES_PREFERENCE = "custom-search-engines";
     private static final String PROFILE_PREFERENCES_PREFIX = "browser.profile.";
     private static final int REQUEST_IMPORT_EXTENSION_ZIP = 7401;
-    private static final int REQUEST_SELECT_WALLPAPER = 7402;
     private static final int REQUEST_DNS_VPN_CONSENT = 7403;
-    private static final int WALLPAPER_THUMBNAIL_SAMPLE_SIZE = 8;
     private static final String USER_EXTENSION_PREFIX = "extension.mv3.";
     private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*:");
     private static final Pattern HOST_AND_PORT = Pattern.compile("^[^\\s/:]+:[0-9]{1,5}(/.*)?$");
@@ -132,10 +127,11 @@ public final class MainActivity extends Activity {
     private Dialog searchEngineDialog;
     private Dialog tabSwitcherDialog;
     private Dialog settingsDialog;
+    private Dialog developerDebugDialog;
+    private Dialog consolePanelDialog;
     private Dialog pluginManagerDialog;
     private Dialog pluginEditorDialog;
     private Dialog extensionManagerDialog;
-    private Dialog wallpaperDialog;
     private ControlledCrawlerDialog controlledCrawlerUi;
     private Dialog profileManagerDialog;
     private boolean activityResumed;
@@ -183,14 +179,16 @@ public final class MainActivity extends Activity {
             return Math.max(1, bitmap.getByteCount());
         }
     };
+    private static final long WALLPAPER_REFRESH_INTERVAL_MILLIS = 60_000L;
     private final Handler wallpaperRotationHandler = new Handler(Looper.getMainLooper());
+    private String appliedWallpaperLocalDate;
     private boolean wallpaperRotationChecksActive;
     private final Runnable wallpaperRotationCheck = new Runnable() {
         @Override
         public void run() {
             if (!wallpaperRotationChecksActive) return;
             refreshDailyWallpaper();
-            wallpaperRotationHandler.postDelayed(this, 60_000L);
+            wallpaperRotationHandler.postDelayed(this, WALLPAPER_REFRESH_INTERVAL_MILLIS);
         }
     };
     private int safeLeftInset;
@@ -205,6 +203,15 @@ public final class MainActivity extends Activity {
     private BrowserProfileStore.Profile currentBrowserProfile;
     private android.content.SharedPreferences profilePreferences;
     private boolean profileMetadataRecovered;
+    private final WebConsoleBuffer webConsoleBuffer = new WebConsoleBuffer();
+    private boolean consolePanelOpen;
+    private boolean pendingConsolePanelOpen;
+    private boolean consolePanelCloseRestartInProgress;
+    private boolean suppressConsoleCloseRestart;
+    private String consoleActiveTabId;
+    private TextView consolePanelStatus;
+    private ListView consoleEntryList;
+    private BaseAdapter consoleEntryAdapter;
     private final Map<String, BrowserTabSession> browserSessions = new HashMap<>();
     private LocalExtensionArchive.Store localExtensionArchiveStore;
     private boolean extensionArchiveLoaded;
@@ -222,6 +229,7 @@ public final class MainActivity extends Activity {
         }
     }
 
+    @android.annotation.SuppressLint("ApplySharedPref")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -235,6 +243,12 @@ public final class MainActivity extends Activity {
         insetsController.setAppearanceLightNavigationBars(true);
 
         android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE);
+        pendingConsolePanelOpen = ((savedInstanceState != null
+                && savedInstanceState.getBoolean(STATE_CONSOLE_PANEL_OPEN, false))
+                || preferences.getBoolean(WebDebugPolicy.IN_APP_CONSOLE_PANEL_REQUEST_PREFERENCE, false))
+                && preferences.getBoolean(WebDebugPolicy.IN_APP_CONSOLE_PREFERENCE,
+                        WebDebugPolicy.IN_APP_CONSOLE_DEFAULT);
+        preferences.edit().remove(WebDebugPolicy.IN_APP_CONSOLE_PANEL_REQUEST_PREFERENCE).commit();
         try {
             browserProfileStore = new BrowserProfileStore(getFilesDir());
             browserProfileStore.initialize("默认环境", Locale.getDefault().toLanguageTag(),
@@ -295,7 +309,27 @@ public final class MainActivity extends Activity {
         } catch (IOException error) {
             throw new IllegalStateException("Gecko profile path is unavailable", error);
         }
-        GeckoViewBrowserAdapter.initializeRuntime(this, profileDirectory, isWebRtcProtectionEnabled(), result -> {
+        GeckoViewBrowserAdapter.setConsoleSetupListener((requested, success) -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (!success) {
+                pendingConsolePanelOpen = false;
+                Toast.makeText(this, requested ? R.string.in_app_console_setup_failed
+                        : R.string.in_app_console_cleanup_failed, Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (requested && pendingConsolePanelOpen) {
+                pendingConsolePanelOpen = false;
+                searchEngineIconHandler.post(() -> {
+                    if (!isFinishing() && !isDestroyed()) showInAppConsolePanel();
+                });
+            }
+        });
+        if (preferences.getBoolean(WebDebugPolicy.IN_APP_CONSOLE_CLEANUP_FAILED_PREFERENCE, false)) {
+            preferences.edit().remove(WebDebugPolicy.IN_APP_CONSOLE_CLEANUP_FAILED_PREFERENCE).apply();
+            Toast.makeText(this, R.string.in_app_console_cleanup_failed, Toast.LENGTH_LONG).show();
+        }
+        GeckoViewBrowserAdapter.initializeRuntime(this, profileDirectory, isWebRtcProtectionEnabled(),
+                pendingConsolePanelOpen, result -> {
             if (result.protectedModeEnabled && result.javascriptFallback) {
                 Toast.makeText(this, R.string.webrtc_protection_fallback, Toast.LENGTH_LONG).show();
             }
@@ -352,19 +386,28 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         initializeBrowserViews();
 
-        String[] savedTabIds = savedInstanceState == null
-                ? null : savedInstanceState.getStringArray(STATE_TAB_IDS);
+        Bundle tabRestoreState = savedInstanceState == null
+                ? getIntent().getBundleExtra(ProfileRestartActivity.EXTRA_RESTART_STATE)
+                : savedInstanceState;
+        String[] savedTabIds = tabRestoreState == null
+                ? null : tabRestoreState.getStringArray(STATE_TAB_IDS);
         if (savedTabIds != null) {
             for (String id : savedTabIds) {
-                if (id != null && !id.trim().isEmpty()) createBrowserTab(id, savedInstanceState);
+                if (id != null && !id.trim().isEmpty()) createBrowserTab(id, tabRestoreState);
             }
         }
         if (tabRegistry.size() == 0) createBrowserTab(null, null);
-        if (savedInstanceState != null) {
-            tabRegistry.select(savedInstanceState.getString(STATE_SELECTED_TAB));
+        if (tabRestoreState != null) {
+            tabRegistry.select(tabRestoreState.getString(STATE_SELECTED_TAB));
         }
         renderActiveTab();
         refreshProfileBadge();
+        if (pendingConsolePanelOpen && GeckoViewBrowserAdapter.isConsoleExtensionReady()) {
+            pendingConsolePanelOpen = false;
+            searchEngineIconHandler.post(() -> {
+                if (!isFinishing() && !isDestroyed()) showInAppConsolePanel();
+            });
+        }
         if (profileMetadataRecovered) {
             Toast.makeText(this, "环境索引已恢复；旧版浏览数据未迁移或删除", Toast.LENGTH_LONG).show();
         }
@@ -401,10 +444,6 @@ public final class MainActivity extends Activity {
         for (BrowserTabSession session : browserSessions.values()) {
             if (session.browser.onActivityResult(requestCode, resultCode, data)) return;
         }
-        if (requestCode == REQUEST_SELECT_WALLPAPER) {
-            applyWallpaperPickerResult(resultCode, data);
-            return;
-        }
         if (requestCode != REQUEST_IMPORT_EXTENSION_ZIP || resultCode != RESULT_OK || data == null
                 || data.getData() == null) return;
         try (InputStream input = getContentResolver().openInputStream(data.getData())) {
@@ -421,521 +460,31 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void showWallpaperPicker() {
-        if (!isWallpaperPickerWindowReady()) return;
-        if (wallpaperDialog != null) {
-            if (wallpaperDialog.isShowing()) return;
-            wallpaperDialog = null;
-        }
-        WallpaperPickerFlow.Session picker = WallpaperPickerFlow.open(readWallpaperRotationState());
-        Dialog dialog = new Dialog(this);
-        dialog.setOnDismissListener(dismissed -> {
-            if (wallpaperDialog == dialog) wallpaperDialog = null;
-        });
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        dialog.setCanceledOnTouchOutside(true);
+    private void restoreSelectedWallpaper() {
+        appliedWallpaperLocalDate = null;
+        refreshDailyWallpaper();
+    }
 
-        LinearLayout sheet = new LinearLayout(this);
-        sheet.setOrientation(LinearLayout.VERTICAL);
-        sheet.setPadding(dp(18), dp(16), dp(18), dp(12));
-        sheet.setBackground(rounded(WHITE, dp(22), BORDER));
-        TextView title = label(getString(R.string.wallpaper_picker_title), 19, INK, true);
-        sheet.addView(title);
-        TextView subtitle = label(getString(R.string.wallpaper_picker_subtitle), 12, SECONDARY, false);
-        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        subtitleParams.topMargin = dp(4);
-        subtitleParams.bottomMargin = dp(9);
-        sheet.addView(subtitle, subtitleParams);
-
-        FrameLayout preview = new FrameLayout(this);
-        preview.setBackground(rounded(Color.rgb(235, 238, 243), dp(14), BORDER));
-        preview.setClipToOutline(true);
-        ImageView previewImage = new ImageView(this);
-        previewImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        Drawable currentWallpaper = wallpaperBackdrop.getDrawable();
-        if (currentWallpaper == null) previewImage.setImageResource(R.drawable.new_tab_wallpaper);
-        else previewImage.setImageDrawable(currentWallpaper);
-        preview.addView(previewImage, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        TextView previewLabel = label(getCurrentWallpaperCaption(), 12, Color.WHITE, true);
-        previewLabel.setPadding(dp(10), dp(7), dp(10), dp(7));
-        previewLabel.setBackground(rounded(0xB51B2230, dp(11), Color.TRANSPARENT));
-        FrameLayout.LayoutParams captionParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.START);
-        captionParams.setMargins(dp(8), 0, dp(8), dp(8));
-        preview.addView(previewLabel, captionParams);
-        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(112));
-        previewParams.bottomMargin = dp(9);
-        sheet.addView(preview, previewParams);
-
-        addWallpaperChoice(sheet, getString(R.string.wallpaper_choose_photo), () -> {
-            dialog.dismiss();
-            openWallpaperDocumentPicker();
-        });
-        addWallpaperChoice(sheet, getString(R.string.wallpaper_original), () -> {
-            selectBundledWallpaper(WallpaperRotation.DEFAULT_ID);
-            refreshWallpaperPicker();
-        });
-
-        LinearLayout rotationRow = new LinearLayout(this);
-        rotationRow.setGravity(Gravity.CENTER_VERTICAL);
-        rotationRow.setPadding(dp(10), 0, dp(8), 0);
-        rotationRow.setMinimumHeight(dp(54));
-        rotationRow.setBackground(rounded(Color.rgb(247, 248, 251), dp(13), BORDER));
-        LinearLayout rotationCopy = new LinearLayout(this);
-        rotationCopy.setOrientation(LinearLayout.VERTICAL);
-        TextView rotationTitle = label(getString(R.string.wallpaper_daily_rotation), 13, INK, true);
-        rotationCopy.addView(rotationTitle);
-        TextView rotationHint = label(getString(R.string.wallpaper_daily_rotation_hint), 10, SECONDARY, false);
-        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hintParams.topMargin = dp(2);
-        rotationCopy.addView(rotationHint, hintParams);
-        rotationRow.addView(rotationCopy, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        SwitchCompat automaticSwitch = new SwitchCompat(this);
-        automaticSwitch.setChecked(picker.selection.automatic);
-        rotationRow.addView(automaticSwitch, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        sheet.addView(rotationRow);
-        automaticSwitch.setOnCheckedChangeListener((button, checked) -> {
-            WallpaperRotation.SelectionState changed = readWallpaperRotationState()
-                    .setAutomatic(checked, LocalDate.now().toString());
-            if (!persistWallpaperRotationState(changed)) {
-                button.setOnCheckedChangeListener(null);
-                button.setChecked(!checked);
-                button.setOnCheckedChangeListener((source, value) -> {
-                    WallpaperRotation.SelectionState retry = readWallpaperRotationState()
-                            .setAutomatic(value, LocalDate.now().toString());
-                    if (persistWallpaperRotationState(retry)) {
-                        applyBundledWallpaper(retry.selectedId);
-                        refreshWallpaperPicker();
-                    }
-                });
-                Toast.makeText(this, R.string.wallpaper_rotation_save_failed, Toast.LENGTH_LONG).show();
-                return;
-            }
-            applyBundledWallpaper(changed.selectedId);
-            refreshWallpaperPicker();
-        });
-
-        TextView galleryTitle = label(getString(R.string.wallpaper_gallery_count,
-                WallpaperRotation.all().size()), 12, SECONDARY, true);
-        LinearLayout.LayoutParams galleryTitleParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        galleryTitleParams.topMargin = dp(10);
-        galleryTitleParams.bottomMargin = dp(5);
-        sheet.addView(galleryTitle, galleryTitleParams);
-        ScrollView galleryScroll = new ScrollView(this);
-        galleryScroll.setFillViewport(false);
-        galleryScroll.setVerticalScrollBarEnabled(false);
-        galleryScroll.setOnScrollChangeListener((view, scrollX, scrollY, oldScrollX, oldScrollY) ->
-                loadVisibleWallpaperThumbnails(galleryScroll));
-        LinearLayout galleryRows = new LinearLayout(this);
-        galleryRows.setOrientation(LinearLayout.VERTICAL);
-        List<WallpaperRotation.Wallpaper> wallpapers = picker.wallpapers();
-        for (int i = 0; i < wallpapers.size(); i += 2) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            WallpaperRotation.Wallpaper first = wallpapers.get(i);
-            row.addView(buildWallpaperCard(first), new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            if (i + 1 < wallpapers.size()) {
-                WallpaperRotation.Wallpaper second = wallpapers.get(i + 1);
-                row.addView(buildWallpaperCard(second), new LinearLayout.LayoutParams(0,
-                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            } else {
-                row.addView(new View(this), new LinearLayout.LayoutParams(0, dp(1), 1f));
-            }
-            galleryRows.addView(row, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        }
-        galleryScroll.addView(galleryRows);
-        sheet.addView(galleryScroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+    /** Applies the image mapped to the current device-local calendar date. */
+    private void refreshDailyWallpaper() {
+        if (wallpaperBackdrop == null) return;
+        String localDate = LocalDate.now().toString();
+        if (localDate.equals(appliedWallpaperLocalDate)) return;
+        WallpaperRotation.Wallpaper wallpaper = WallpaperRotation.forLocalDate(localDate);
         try {
-            showBottomDialog(dialog, sheet, dp(520), dp(800));
-        } catch (WindowManager.BadTokenException | IllegalStateException error) {
-            if (dialog.isShowing()) dialog.dismiss();
-            return;
-        }
-        wallpaperDialog = dialog;
-        galleryScroll.post(() -> {
-            if (wallpaperDialog != dialog || !dialog.isShowing() || !isWallpaperPickerWindowReady()) return;
-            loadVisibleWallpaperThumbnails(galleryScroll);
-        });
-    }
-
-    private View buildWallpaperCard(WallpaperRotation.Wallpaper wallpaper) {
-        String selectedId = readWallpaperRotationState().selectedId;
-        boolean selected = wallpaper.id.equals(selectedId);
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setTag(wallpaper.id);
-        card.setPadding(dp(5), dp(5), dp(5), dp(7));
-        card.setBackground(rounded(selected ? Color.rgb(248, 250, 255) : WHITE,
-                dp(14), selected ? ACCENT : BORDER));
-        card.setFocusable(true);
-        card.setContentDescription(getString(selected
-                ? R.string.wallpaper_card_selected : R.string.wallpaper_card_description,
-                wallpaper.title));
-        ImageView thumbnail = new ImageView(this);
-        thumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        thumbnail.setBackground(rounded(Color.rgb(235, 238, 243), dp(10), Color.TRANSPARENT));
-        thumbnail.setClipToOutline(true);
-        thumbnail.setImageResource(R.drawable.ic_browser);
-        card.addView(thumbnail, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(128)));
-        TextView caption = label(wallpaper.title, 11, selected ? ACCENT : INK, true);
-        caption.setSingleLine(true);
-        caption.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        caption.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(28));
-        captionParams.topMargin = dp(2);
-        card.addView(caption, captionParams);
-        card.setOnClickListener(view -> {
-            selectBundledWallpaper(wallpaper.id);
-            refreshWallpaperPicker();
-        });
-        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        cardParams.setMargins(dp(3), dp(3), dp(3), dp(5));
-        card.setLayoutParams(cardParams);
-        return card;
-    }
-
-    private void loadVisibleWallpaperThumbnails(ScrollView galleryScroll) {
-        if (galleryScroll.getHeight() <= 0 || galleryScroll.getChildCount() == 0) return;
-        View rowsView = galleryScroll.getChildAt(0);
-        if (!(rowsView instanceof ViewGroup rows)) return;
-        int viewportTop = galleryScroll.getScrollY();
-        int viewportBottom = viewportTop + galleryScroll.getHeight();
-        for (int rowIndex = 0; rowIndex < rows.getChildCount(); rowIndex++) {
-            View row = rows.getChildAt(rowIndex);
-            if (row.getBottom() < viewportTop || row.getTop() > viewportBottom) continue;
-            if (!(row instanceof ViewGroup cards)) continue;
-            for (int cardIndex = 0; cardIndex < cards.getChildCount(); cardIndex++) {
-                View cardView = cards.getChildAt(cardIndex);
-                if (!(cardView instanceof ViewGroup card)
-                        || !(card.getTag() instanceof String wallpaperId)
-                        || card.getChildCount() == 0
-                        || !(card.getChildAt(0) instanceof ImageView thumbnail)
-                        || wallpaperId.equals(thumbnail.getTag())) continue;
-                thumbnail.setTag(wallpaperId);
-                try {
-                    Bitmap bitmap = loadBundledWallpaper(wallpaperId, WALLPAPER_THUMBNAIL_SAMPLE_SIZE);
-                    if (bitmap == null) throw new IOException("Bundled wallpaper thumbnail is unavailable");
-                    thumbnail.setImageBitmap(bitmap);
-                } catch (IOException | RuntimeException error) {
-                    thumbnail.setImageResource(R.drawable.ic_browser);
+            Bitmap bitmap;
+            if (wallpaper.assetPath == null) {
+                bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.new_tab_wallpaper);
+            } else {
+                try (InputStream input = getAssets().open(wallpaper.assetPath)) {
+                    bitmap = BitmapFactory.decodeStream(input);
                 }
             }
-        }
-    }
-
-    private String getCurrentWallpaperCaption() {
-        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE);
-        if (wallpaperPreferenceString(preferences, WALLPAPER_URI_PREFERENCE, null) != null
-                || wallpaperPreferenceBoolean(preferences, WALLPAPER_LOCAL_COPY_PREFERENCE, false)) {
-            return getString(R.string.wallpaper_local_photo_preview);
-        }
-        WallpaperRotation.Wallpaper wallpaper = WallpaperRotation.find(
-                readWallpaperRotationState().selectedId);
-        return getString(R.string.wallpaper_preview_caption,
-                wallpaper == null ? getString(R.string.wallpaper_default_name) : wallpaper.title);
-    }
-
-    private WallpaperRotation.SelectionState readWallpaperRotationState() {
-        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE);
-        return new WallpaperRotation.SelectionState(
-                wallpaperPreferenceString(preferences, WALLPAPER_BUNDLED_ID_PREFERENCE,
-                        WallpaperRotation.DEFAULT_ID),
-                wallpaperPreferenceBoolean(preferences, WALLPAPER_AUTO_PREFERENCE, false),
-                wallpaperPreferenceString(preferences, WALLPAPER_AUTO_DATE_PREFERENCE, null),
-                wallpaperPreferenceString(preferences, WALLPAPER_LAST_AUTO_ID_PREFERENCE, null));
-    }
-
-    private String wallpaperPreferenceString(android.content.SharedPreferences preferences,
-                                             String key, String fallback) {
-        try {
-            return preferences.getString(key, fallback);
-        } catch (ClassCastException malformedPreference) {
-            preferences.edit().remove(key).apply();
-            return fallback;
-        }
-    }
-
-    private boolean wallpaperPreferenceBoolean(android.content.SharedPreferences preferences,
-                                                String key, boolean fallback) {
-        try {
-            return preferences.getBoolean(key, fallback);
-        } catch (ClassCastException malformedPreference) {
-            preferences.edit().remove(key).apply();
-            return fallback;
-        }
-    }
-
-    private boolean persistWallpaperRotationState(WallpaperRotation.SelectionState state) {
-        return persistWallpaperRotationState(state, false);
-    }
-
-    private boolean persistWallpaperRotationState(WallpaperRotation.SelectionState state, boolean clearPhotoSelection) {
-        android.content.SharedPreferences.Editor editor = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE)
-                .edit().putBoolean(WALLPAPER_AUTO_PREFERENCE, state.automatic)
-                .remove(WALLPAPER_AUTO_DATE_PREFERENCE);
-        if (clearPhotoSelection) {
-            editor.remove(WALLPAPER_URI_PREFERENCE).remove(WALLPAPER_LOCAL_COPY_PREFERENCE);
-        }
-        if (state.selectedId == null) editor.remove(WALLPAPER_BUNDLED_ID_PREFERENCE);
-        else editor.putString(WALLPAPER_BUNDLED_ID_PREFERENCE, state.selectedId);
-        if (state.automaticDate != null) editor.putString(WALLPAPER_AUTO_DATE_PREFERENCE, state.automaticDate);
-        if (state.lastAutomaticId != null) editor.putString(WALLPAPER_LAST_AUTO_ID_PREFERENCE, state.lastAutomaticId);
-        else editor.remove(WALLPAPER_LAST_AUTO_ID_PREFERENCE);
-        return editor.commit();
-    }
-
-    private void refreshWallpaperPicker() {
-        Dialog previous = wallpaperDialog;
-        if (previous == null || !previous.isShowing()) return;
-        try {
-            previous.dismiss();
-        } catch (IllegalArgumentException | IllegalStateException ignored) {
-            // Dismiss may race with the window manager while this Activity is leaving.
-        }
-        if (wallpaperDialog == previous) wallpaperDialog = null;
-        postWallpaperPickerAfterMenuDismiss(this::showWallpaperPicker);
-    }
-
-    private void addWallpaperChoice(LinearLayout sheet, String title, Runnable action) {
-        TextView choice = label(title, 14, INK, true);
-        choice.setGravity(Gravity.CENTER_VERTICAL);
-        choice.setPadding(dp(14), 0, dp(14), 0);
-        choice.setMinHeight(dp(48));
-        choice.setBackground(rounded(Color.rgb(247, 248, 251), dp(13), BORDER));
-        choice.setFocusable(true);
-        choice.setOnClickListener(view -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.bottomMargin = dp(8);
-        sheet.addView(choice, params);
-    }
-
-    private void selectBundledWallpaper(String wallpaperId) {
-        WallpaperPickerFlow.SelectionResult<Bitmap> result = WallpaperPickerFlow
-                .open(readWallpaperRotationState())
-                .select(wallpaperId, id -> loadBundledWallpaper(id, 1));
-        if (!result.successful) {
-            Toast.makeText(this, R.string.wallpaper_selection_failed, Toast.LENGTH_LONG).show();
-            return;
-        }
-        WallpaperRotation.Wallpaper wallpaper = WallpaperRotation.find(result.selection.selectedId);
-        if (wallpaper == null) return;
-        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE);
-        String previousUri = wallpaperPreferenceString(preferences, WALLPAPER_URI_PREFERENCE, null);
-        if (!persistWallpaperRotationState(result.selection, true)) {
-            Toast.makeText(this, R.string.wallpaper_rotation_save_failed, Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (previousUri != null) releaseWallpaperPermission(previousUri);
-        new File(getFilesDir(), WALLPAPER_LOCAL_COPY_FILE).delete();
-        new File(getFilesDir(), WALLPAPER_LOCAL_COPY_FILE + ".tmp").delete();
-        wallpaperBackdrop.setImageBitmap(result.preview);
-        if (result.usedFallback) {
-            Toast.makeText(this, R.string.wallpaper_asset_unavailable, Toast.LENGTH_LONG).show();
-        } else {
-            Toast.makeText(this, getString(R.string.wallpaper_manual_selected, wallpaper.title),
-                    Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private boolean applyBundledWallpaper(String wallpaperId) {
-        try {
-            Bitmap bitmap = loadBundledWallpaper(wallpaperId, 1);
-            if (bitmap == null) throw new IOException("Bundled wallpaper is unavailable");
+            if (bitmap == null) throw new IOException("Bundled wallpaper could not be decoded");
             wallpaperBackdrop.setImageBitmap(bitmap);
-            return true;
+            appliedWallpaperLocalDate = localDate;
         } catch (IOException | IllegalArgumentException error) {
-            Toast.makeText(this, R.string.wallpaper_selection_failed, Toast.LENGTH_LONG).show();
-            return false;
-        }
-    }
-
-    private Bitmap loadBundledWallpaper(String wallpaperId, int sampleSize) throws IOException {
-        WallpaperRotation.Wallpaper wallpaper = WallpaperRotation.find(wallpaperId);
-        if (wallpaper == null) throw new IOException("Unknown bundled wallpaper");
-        BitmapFactory.Options options = new BitmapFactory.Options();
-        options.inSampleSize = Math.max(1, sampleSize);
-        if (options.inSampleSize > 1) options.inPreferredConfig = Bitmap.Config.RGB_565;
-        Bitmap bitmap;
-        if (wallpaper.assetPath == null) {
-            bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.new_tab_wallpaper, options);
-        } else {
-            try (InputStream input = getAssets().open(wallpaper.assetPath)) {
-                bitmap = BitmapFactory.decodeStream(input, null, options);
-            }
-        }
-        if (bitmap == null) throw new IOException("Bundled wallpaper could not be decoded");
-        return bitmap;
-    }
-
-    private void refreshDailyWallpaper() {
-        WallpaperRotation.SelectionState current = readWallpaperRotationState();
-        if (!current.automatic) return;
-        WallpaperRotation.SelectionState updated = current.onLocalDate(LocalDate.now().toString());
-        if (updated == current) return;
-        if (persistWallpaperRotationState(updated)) applyBundledWallpaper(updated.selectedId);
-    }
-
-    private void openWallpaperDocumentPicker() {
-        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        picker.addCategory(Intent.CATEGORY_OPENABLE);
-        picker.setType("image/*");
-        picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        try {
-            startActivityForResult(picker, REQUEST_SELECT_WALLPAPER);
-        } catch (ActivityNotFoundException error) {
-            Toast.makeText(this, R.string.wallpaper_picker_unavailable, Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void applyWallpaperPickerResult(int resultCode, Intent data) {
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
-        Uri uri = data.getData();
-        if (uri.getScheme() == null || !"content".equalsIgnoreCase(uri.getScheme())) {
-            Toast.makeText(this, R.string.wallpaper_selection_failed, Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        boolean persistedGrant = false;
-        boolean tookGrant = false;
-        int readFlag = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
-        if (readFlag != 0 && (data.getFlags() & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0) {
-            try {
-                getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                persistedGrant = true;
-                tookGrant = true;
-            } catch (SecurityException ignored) {
-                // A readable but non-persistable provider grant is saved as a private thumbnail copy instead.
-            }
-        }
-
-        try {
-            Bitmap thumbnail = loadWallpaperThumbnail(uri);
-            if (persistedGrant) {
-                replaceWallpaperSelection(uri.toString(), false);
-            } else {
-                saveWallpaperThumbnail(thumbnail);
-                replaceWallpaperSelection(null, true);
-            }
-            wallpaperBackdrop.setImageBitmap(thumbnail);
-            Toast.makeText(this, R.string.wallpaper_selection_saved, Toast.LENGTH_SHORT).show();
-        } catch (Exception error) {
-            if (tookGrant) releaseWallpaperPermission(uri.toString());
-            Toast.makeText(this, R.string.wallpaper_selection_failed, Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private Bitmap loadWallpaperThumbnail(Uri uri) throws IOException {
-        Bitmap bitmap = getContentResolver().loadThumbnail(uri, new Size(1600, 2400), null);
-        if (bitmap == null) throw new IOException("Image provider returned no wallpaper preview");
-        return bitmap;
-    }
-
-    private void saveWallpaperThumbnail(Bitmap bitmap) throws IOException {
-        File temporary = new File(getFilesDir(), WALLPAPER_LOCAL_COPY_FILE + ".tmp");
-        File target = new File(getFilesDir(), WALLPAPER_LOCAL_COPY_FILE);
-        try (FileOutputStream output = new FileOutputStream(temporary)) {
-            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                throw new IOException("Could not save wallpaper preview");
-            }
-            output.flush();
-            output.getFD().sync();
-        }
-        if (target.exists() && !target.delete()) {
-            temporary.delete();
-            throw new IOException("Could not replace the previous wallpaper preview");
-        }
-        if (!temporary.renameTo(target)) {
-            temporary.delete();
-            throw new IOException("Could not finish saving the wallpaper preview");
-        }
-    }
-
-    private void replaceWallpaperSelection(String newUri, boolean localCopy) throws IOException {
-        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE);
-        String previousUri = wallpaperPreferenceString(preferences, WALLPAPER_URI_PREFERENCE, null);
-        android.content.SharedPreferences.Editor editor = preferences.edit()
-                .remove(WALLPAPER_URI_PREFERENCE)
-                .remove(WALLPAPER_BUNDLED_ID_PREFERENCE)
-                .remove(WALLPAPER_AUTO_DATE_PREFERENCE)
-                .putBoolean(WALLPAPER_AUTO_PREFERENCE, false)
-                .putBoolean(WALLPAPER_LOCAL_COPY_PREFERENCE, localCopy);
-        if (!localCopy) editor.putString(WALLPAPER_URI_PREFERENCE, newUri);
-        if (!editor.commit()) throw new IOException("Could not persist wallpaper selection");
-        if (previousUri != null && !previousUri.equals(newUri)) releaseWallpaperPermission(previousUri);
-        if (!localCopy) new File(getFilesDir(), WALLPAPER_LOCAL_COPY_FILE).delete();
-    }
-
-    private void restoreSelectedWallpaper() {
-        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE);
-        WallpaperRotation.SelectionState rotation = readWallpaperRotationState();
-        if (rotation.automatic) {
-            WallpaperRotation.SelectionState updated = rotation.onLocalDate(LocalDate.now().toString());
-            if (updated != rotation) {
-                persistWallpaperRotationState(updated);
-                rotation = updated;
-            }
-            if (!applyBundledWallpaper(rotation.selectedId)) {
-                restoreBundledWallpaper(false);
-            }
-            return;
-        }
-        String savedUri = wallpaperPreferenceString(preferences, WALLPAPER_URI_PREFERENCE, null);
-        try {
-            if (savedUri != null) {
-                wallpaperBackdrop.setImageBitmap(loadWallpaperThumbnail(Uri.parse(savedUri)));
-            } else if (wallpaperPreferenceBoolean(preferences, WALLPAPER_LOCAL_COPY_PREFERENCE, false)) {
-                File savedCopy = new File(getFilesDir(), WALLPAPER_LOCAL_COPY_FILE);
-                Bitmap bitmap = savedCopy.isFile() ? BitmapFactory.decodeFile(savedCopy.getAbsolutePath()) : null;
-                if (bitmap == null) throw new IOException("Saved wallpaper preview is unavailable");
-                wallpaperBackdrop.setImageBitmap(bitmap);
-            } else {
-                String bundledId = wallpaperPreferenceString(preferences,
-                        WALLPAPER_BUNDLED_ID_PREFERENCE, WallpaperRotation.DEFAULT_ID);
-                if (!applyBundledWallpaper(bundledId)) restoreBundledWallpaper(false);
-            }
-        } catch (Exception error) {
-            restoreBundledWallpaper(false);
-        }
-    }
-
-    private void restoreBundledWallpaper(boolean notify) {
-        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE);
-        if (notify) {
-            selectBundledWallpaper(WallpaperRotation.DEFAULT_ID);
-            return;
-        }
-        String previousUri = wallpaperPreferenceString(preferences, WALLPAPER_URI_PREFERENCE, null);
-        WallpaperRotation.SelectionState selection = readWallpaperRotationState()
-                .selectManually(WallpaperRotation.DEFAULT_ID);
-        persistWallpaperRotationState(selection, true);
-        if (previousUri != null) releaseWallpaperPermission(previousUri);
-        new File(getFilesDir(), WALLPAPER_LOCAL_COPY_FILE).delete();
-        new File(getFilesDir(), WALLPAPER_LOCAL_COPY_FILE + ".tmp").delete();
-        applyBundledWallpaper(WallpaperRotation.DEFAULT_ID);
-        if (notify) Toast.makeText(this, R.string.wallpaper_original_restored, Toast.LENGTH_SHORT).show();
-    }
-
-    private void releaseWallpaperPermission(String uriText) {
-        try {
-            getContentResolver().releasePersistableUriPermission(
-                    Uri.parse(uriText), Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } catch (SecurityException | IllegalArgumentException ignored) {
-            // The document provider may have removed the URI or its persisted permission.
+            Toast.makeText(this, R.string.wallpaper_load_failed, Toast.LENGTH_LONG).show();
         }
     }
 
@@ -1397,30 +946,6 @@ public final class MainActivity extends Activity {
         if (overflowPopup == popup && !popup.isShowing()) overflowPopup = null;
     }
 
-    private void postWallpaperPickerAfterMenuDismiss(Runnable action) {
-        if (action == null) return;
-        Window window = getWindow();
-        if (window == null) return;
-        View decor = window.getDecorView();
-        if (decor == null) return;
-        decor.post(() -> {
-            if (isWallpaperPickerWindowReady(decor)) action.run();
-        });
-    }
-
-    private boolean isWallpaperPickerWindowReady() {
-        Window window = getWindow();
-        return window != null && isWallpaperPickerWindowReady(window.getDecorView());
-    }
-
-    private boolean isWallpaperPickerWindowReady(View expectedDecor) {
-        if (expectedDecor == null || wallpaperBackdrop == null || !activityResumed
-                || isFinishing() || isDestroyed()) return false;
-        Window window = getWindow();
-        return window != null && window.getDecorView() == expectedDecor
-                && expectedDecor.isAttachedToWindow() && expectedDecor.getWindowToken() != null;
-    }
-
     private void dispatchOtherOverflowAction(String actionId) {
         if (BrowserUiModel.NEW_TAB.equals(actionId)) openNewTab();
         else if (BrowserUiModel.SWITCH_TABS.equals(actionId)) showTabSwitcher();
@@ -1651,6 +1176,15 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         subtitleParams.topMargin = dp(4);
         sheet.addView(subtitle, subtitleParams);
+        TextView wallpaperDisclosure = label(getString(R.string.wallpaper_daily_rotation_disclosure),
+                10, SECONDARY, false);
+        wallpaperDisclosure.setLineSpacing(dp(2), 1f);
+        wallpaperDisclosure.setClickable(false);
+        wallpaperDisclosure.setFocusable(false);
+        LinearLayout.LayoutParams wallpaperDisclosureParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        wallpaperDisclosureParams.topMargin = dp(7);
+        sheet.addView(wallpaperDisclosure, wallpaperDisclosureParams);
         String currentMode = siteMode == SiteMode.Mode.DESKTOP
                 ? getString(R.string.site_mode_desktop) : getString(R.string.site_mode_phone);
         addSettingsRow(sheet, "⌕", getString(R.string.settings_search_engine),
@@ -1662,6 +1196,20 @@ public final class MainActivity extends Activity {
             dialog.dismiss();
             toggleSiteMode();
         });
+        boolean remoteDebugging = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE)
+                .getBoolean(WebDebugPolicy.REMOTE_DEBUGGING_PREFERENCE,
+                        WebDebugPolicy.REMOTE_DEBUGGING_DEFAULT);
+        boolean consoleEnabled = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE)
+                .getBoolean(WebDebugPolicy.IN_APP_CONSOLE_PREFERENCE,
+                        WebDebugPolicy.IN_APP_CONSOLE_DEFAULT);
+        addSettingsRow(sheet, "⌘", getString(R.string.settings_developer_debug),
+                getString(remoteDebugging ? R.string.remote_debug_enabled : R.string.remote_debug_disabled)
+                        + " · " + getString(consoleEnabled ? R.string.in_app_console_enabled_summary
+                        : R.string.in_app_console_disabled_summary),
+                () -> {
+                    dialog.dismiss();
+                    showDeveloperDebugSettings();
+                });
         addSettingsRow(sheet, "◎", getString(R.string.settings_content_tracking),
                 getString(R.string.gecko_tracking_active), this::showContentProtectionDetails);
         boolean webRtcProtectionEnabled = isWebRtcProtectionEnabled();
@@ -1724,6 +1272,435 @@ public final class MainActivity extends Activity {
         settingsScroll.addView(sheet, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         showBottomDialog(dialog, settingsScroll, dp(330), dp(620));
+    }
+
+    private void showDeveloperDebugSettings() {
+        if (developerDebugDialog != null && developerDebugDialog.isShowing()) return;
+        Dialog dialog = new Dialog(this);
+        developerDebugDialog = dialog;
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.setOnDismissListener(ignored -> {
+            if (developerDebugDialog == dialog) developerDebugDialog = null;
+        });
+
+        LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(14));
+        sheet.setBackground(rounded(WHITE, dp(23), BORDER));
+        sheet.addView(label(getString(R.string.settings_developer_debug), 19, INK, true));
+
+        TextView disclosure = label(getString(R.string.remote_debug_disclosure), 12, SECONDARY, false);
+        disclosure.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams disclosureParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        disclosureParams.topMargin = dp(8);
+        sheet.addView(disclosure, disclosureParams);
+
+        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES,
+                MODE_PRIVATE);
+        SwitchCompat remoteDebugSwitch = new SwitchCompat(this);
+        remoteDebugSwitch.setText(R.string.remote_debug_toggle);
+        remoteDebugSwitch.setTextSize(14);
+        remoteDebugSwitch.setTextColor(INK);
+        remoteDebugSwitch.setChecked(preferences.getBoolean(
+                WebDebugPolicy.REMOTE_DEBUGGING_PREFERENCE,
+                WebDebugPolicy.REMOTE_DEBUGGING_DEFAULT));
+        LinearLayout.LayoutParams remoteParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        remoteParams.topMargin = dp(12);
+        sheet.addView(remoteDebugSwitch, remoteParams);
+
+        TextView restartNote = label(getString(R.string.remote_debug_restart_note), 11,
+                SECONDARY, false);
+        restartNote.setLineSpacing(dp(2), 1f);
+        sheet.addView(restartNote);
+        remoteDebugSwitch.setOnCheckedChangeListener((button, checked) -> {
+            if (!beginRemoteDebugRuntimeRestart(checked)) {
+                button.setChecked(preferences.getBoolean(
+                        WebDebugPolicy.REMOTE_DEBUGGING_PREFERENCE,
+                        WebDebugPolicy.REMOTE_DEBUGGING_DEFAULT));
+            }
+        });
+
+        SwitchCompat consoleSwitch = new SwitchCompat(this);
+        consoleSwitch.setText(R.string.in_app_console_toggle);
+        consoleSwitch.setTextSize(14);
+        consoleSwitch.setTextColor(INK);
+        consoleSwitch.setChecked(preferences.getBoolean(WebDebugPolicy.IN_APP_CONSOLE_PREFERENCE,
+                WebDebugPolicy.IN_APP_CONSOLE_DEFAULT));
+        LinearLayout.LayoutParams consoleParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        consoleParams.topMargin = dp(12);
+        sheet.addView(consoleSwitch, consoleParams);
+
+        TextView consoleNote = label(getString(R.string.in_app_console_disclosure), 11,
+                SECONDARY, false);
+        consoleNote.setLineSpacing(dp(2), 1f);
+        sheet.addView(consoleNote);
+        TextView consoleRestartNote = label(getString(R.string.in_app_console_restart_note), 10,
+                SECONDARY, false);
+        consoleRestartNote.setLineSpacing(dp(2), 1f);
+        sheet.addView(consoleRestartNote);
+
+        TextView openConsole = label(getString(R.string.in_app_console_open), 14, ACCENT, true);
+        openConsole.setGravity(Gravity.CENTER);
+        openConsole.setPadding(dp(12), dp(10), dp(12), dp(10));
+        openConsole.setBackground(rounded(Color.rgb(239, 243, 255), dp(14), BORDER));
+        openConsole.setEnabled(preferences.getBoolean(WebDebugPolicy.IN_APP_CONSOLE_PREFERENCE,
+                WebDebugPolicy.IN_APP_CONSOLE_DEFAULT));
+        consoleSwitch.setOnCheckedChangeListener((button, checked) -> {
+            if (preferences.getBoolean(WebDebugPolicy.IN_APP_CONSOLE_PREFERENCE,
+                    WebDebugPolicy.IN_APP_CONSOLE_DEFAULT) == checked) return;
+            if (!preferences.edit().putBoolean(WebDebugPolicy.IN_APP_CONSOLE_PREFERENCE,
+                    checked).commit()) {
+                Toast.makeText(this, R.string.in_app_console_save_failed, Toast.LENGTH_LONG).show();
+                button.setChecked(!checked);
+                return;
+            }
+            openConsole.setEnabled(checked);
+        });
+        openConsole.setOnClickListener(view -> requestConsolePanelOpen());
+        LinearLayout.LayoutParams openConsoleParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        openConsoleParams.topMargin = dp(10);
+        sheet.addView(openConsole, openConsoleParams);
+
+        ScrollView content = new ScrollView(this);
+        content.setFillViewport(true);
+        content.setVerticalScrollBarEnabled(false);
+        content.addView(sheet, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        showBottomDialog(dialog, content, dp(300), dp(620));
+    }
+
+    private void showInAppConsolePanel() {
+        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES,
+                MODE_PRIVATE);
+        if (!preferences.getBoolean(WebDebugPolicy.IN_APP_CONSOLE_PREFERENCE,
+                WebDebugPolicy.IN_APP_CONSOLE_DEFAULT)) {
+            Toast.makeText(this, R.string.in_app_console_enable_first, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!GeckoViewBrowserAdapter.isConsoleExtensionReady()) {
+            Toast.makeText(this, R.string.in_app_console_setup_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        BrowserTabRegistry.Tab current = activeTab();
+        BrowserTabSession currentSession = activeSession();
+        if (current == null || currentSession == null || current.showingHome || current.failed
+                || !isWebUrlString(currentSession.browser.getUrl())) {
+            Toast.makeText(this, R.string.in_app_console_no_page, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (consolePanelDialog != null && consolePanelDialog.isShowing()) return;
+
+        webConsoleBuffer.clear();
+        BrowserTabRegistry.Tab selected = activeTab();
+        consoleActiveTabId = selected == null ? null : selected.id;
+        consolePanelOpen = true;
+
+        Dialog dialog = new Dialog(this);
+        consolePanelDialog = dialog;
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(16), dp(14), dp(16), dp(12));
+        panel.setBackground(rounded(WHITE, dp(23), BORDER));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = label(getString(R.string.in_app_console_panel_title), 18, INK, true);
+        header.addView(title, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView clear = label(getString(R.string.in_app_console_clear), 12, ACCENT, true);
+        clear.setPadding(dp(8), dp(8), dp(8), dp(8));
+        clear.setOnClickListener(view -> {
+            webConsoleBuffer.clear();
+            refreshConsolePanel();
+        });
+        header.addView(clear);
+        TextView close = label(getString(R.string.close), 12, SECONDARY, true);
+        close.setPadding(dp(8), dp(8), 0, dp(8));
+        close.setOnClickListener(view -> dialog.dismiss());
+        header.addView(close);
+        panel.addView(header);
+
+        TextView disclosure = label(getString(R.string.in_app_console_panel_notice), 10,
+                SECONDARY, false);
+        disclosure.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams disclosureParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        disclosureParams.bottomMargin = dp(8);
+        panel.addView(disclosure, disclosureParams);
+
+        consolePanelStatus = label(getString(R.string.in_app_console_status, 0,
+                WebDebugPolicy.CONSOLE_RING_CAPACITY, 0L), 10, SECONDARY, false);
+        panel.addView(consolePanelStatus);
+
+        consoleEntryList = new ListView(this);
+        consoleEntryList.setDivider(new ColorDrawable(BORDER));
+        consoleEntryList.setDividerHeight(dp(1));
+        consoleEntryList.setBackgroundColor(Color.WHITE);
+        consoleEntryAdapter = new BaseAdapter() {
+            @Override public int getCount() { return webConsoleBuffer.size(); }
+            @Override public WebConsoleEntry getItem(int position) {
+                List<WebConsoleEntry> snapshot = webConsoleBuffer.snapshot();
+                return position >= 0 && position < snapshot.size() ? snapshot.get(position) : null;
+            }
+            @Override public long getItemId(int position) { return position; }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                TextView row = convertView instanceof TextView ? (TextView) convertView
+                        : new TextView(MainActivity.this);
+                row.setPadding(dp(9), dp(7), dp(9), dp(7));
+                row.setTextSize(12);
+                row.setTextColor(INK);
+                row.setGravity(Gravity.TOP | Gravity.START);
+                row.setMaxLines(8);
+                WebConsoleEntry entry = getItem(position);
+                if (entry == null) {
+                    row.setText("");
+                } else {
+                    row.setText(getString(R.string.in_app_console_entry_row,
+                            entry.sequence, entry.categoryLabel(), entry.levelLabel(),
+                            entry.argumentCount));
+                    if (entry.level == WebConsoleEntry.Level.ERROR) row.setTextColor(Color.rgb(174, 45, 45));
+                    else if (entry.level == WebConsoleEntry.Level.WARN) row.setTextColor(Color.rgb(153, 96, 16));
+                }
+                return row;
+            }
+        };
+        consoleEntryList.setAdapter(consoleEntryAdapter);
+        panel.addView(consoleEntryList, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        dialog.setOnDismissListener(ignored -> stopConsolePanel(dialog));
+        showBottomDialog(dialog, panel, dp(300), dp(650));
+        updateConsoleCaptureForSessions();
+        refreshConsolePanel();
+    }
+
+    private void refreshConsolePanel() {
+        if (consolePanelStatus != null) {
+            consolePanelStatus.setText(getString(R.string.in_app_console_status,
+                    webConsoleBuffer.size(), WebDebugPolicy.CONSOLE_RING_CAPACITY,
+                    webConsoleBuffer.droppedByRateLimit()));
+        }
+        if (consoleEntryAdapter != null) {
+            consoleEntryAdapter.notifyDataSetChanged();
+            if (consoleEntryList != null && webConsoleBuffer.size() > 0) {
+                consoleEntryList.setSelection(webConsoleBuffer.size() - 1);
+            }
+        }
+    }
+
+    private void stopConsolePanel(Dialog dialog) {
+        if (dialog == null || consolePanelDialog != dialog) return;
+        consolePanelDialog = null;
+        consolePanelOpen = false;
+        consoleActiveTabId = null;
+        for (BrowserTabSession session : browserSessions.values()) {
+            session.browser.setConsoleCaptureActive(false);
+        }
+        webConsoleBuffer.clear();
+        consolePanelStatus = null;
+        consoleEntryList = null;
+        consoleEntryAdapter = null;
+        if (!suppressConsoleCloseRestart && activityResumed && !isFinishing()) {
+            beginConsolePanelCloseRestart();
+        }
+    }
+
+    private void closeConsolePanelAndClear() {
+        Dialog dialog = consolePanelDialog;
+        if (dialog != null && dialog.isShowing()) dialog.dismiss();
+        else stopConsolePanel(dialog);
+        webConsoleBuffer.clear();
+    }
+
+    private void updateConsoleCaptureForSessions() {
+        BrowserTabRegistry.Tab active = activeTab();
+        String selectedId = active == null ? null : active.id;
+        if (consolePanelOpen && !Objects.equals(consoleActiveTabId, selectedId)) {
+            consoleActiveTabId = selectedId;
+            webConsoleBuffer.clear();
+            refreshConsolePanel();
+        }
+        for (BrowserTabSession session : browserSessions.values()) {
+            boolean capture = consolePanelOpen && active != null && session.tab == active
+                    && !active.showingHome && !active.failed
+                    && GeckoViewBrowserAdapter.isConsoleExtensionReady();
+            session.browser.setConsoleCaptureActive(capture);
+        }
+    }
+
+    private void onConsoleEntry(GeckoSession sourceSession, WebConsoleEntry entry) {
+        runOnUiThread(() -> {
+            if (!consolePanelOpen) return;
+            BrowserTabSession selected = activeSession();
+            if (selected == null || selected.browser.getGeckoSession() != sourceSession) return;
+            webConsoleBuffer.add(entry, android.os.SystemClock.elapsedRealtime());
+            refreshConsolePanel();
+        });
+    }
+
+    @android.annotation.SuppressLint("ApplySharedPref")
+    private boolean requestConsolePanelOpen() {
+        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES,
+                MODE_PRIVATE);
+        if (!preferences.getBoolean(WebDebugPolicy.IN_APP_CONSOLE_PREFERENCE,
+                WebDebugPolicy.IN_APP_CONSOLE_DEFAULT)) {
+            Toast.makeText(this, R.string.in_app_console_enable_first, Toast.LENGTH_LONG).show();
+            return false;
+        }
+        BrowserTabRegistry.Tab current = activeTab();
+        BrowserTabSession currentSession = activeSession();
+        if (current == null || currentSession == null || current.showingHome || current.failed
+                || !isWebUrlString(currentSession.browser.getUrl())) {
+            Toast.makeText(this, R.string.in_app_console_no_page, Toast.LENGTH_LONG).show();
+            return false;
+        }
+        if (GeckoViewBrowserAdapter.isConsoleExtensionReady()) {
+            if (developerDebugDialog != null && developerDebugDialog.isShowing()) {
+                developerDebugDialog.dismiss();
+            }
+            showInAppConsolePanel();
+            return true;
+        }
+        if (!preferences.edit().putBoolean(WebDebugPolicy.IN_APP_CONSOLE_PANEL_REQUEST_PREFERENCE,
+                true).commit()) {
+            Toast.makeText(this, R.string.in_app_console_save_failed, Toast.LENGTH_LONG).show();
+            return false;
+        }
+
+        final int oldPid = android.os.Process.myPid();
+        Intent restart = new Intent(this, ProfileRestartActivity.class);
+        restart.putExtra(ProfileRestartActivity.EXTRA_OLD_PID, oldPid);
+        restart.putExtra(ProfileRestartActivity.EXTRA_DEBUG_RESTART, true);
+        restart.putExtra(ProfileRestartActivity.EXTRA_RESTART_STATE, buildTabRestartState());
+        restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+
+        try {
+            startActivity(restart);
+        } catch (RuntimeException error) {
+            preferences.edit().remove(WebDebugPolicy.IN_APP_CONSOLE_PANEL_REQUEST_PREFERENCE).commit();
+            Toast.makeText(this, R.string.in_app_console_restart_failed, Toast.LENGTH_LONG).show();
+            return false;
+        }
+        dismissOverflowMenuSafely();
+        if (settingsDialog != null && settingsDialog.isShowing()) settingsDialog.dismiss();
+        if (developerDebugDialog != null && developerDebugDialog.isShowing()) {
+            developerDebugDialog.dismiss();
+        }
+        GeckoViewBrowserAdapter.shutdownForProfileSwitch();
+        finishAndRemoveTask();
+        new Handler(Looper.getMainLooper()).postDelayed(
+                () -> android.os.Process.killProcess(oldPid), 800L);
+        return true;
+    }
+
+    @android.annotation.SuppressLint("ApplySharedPref")
+    private void beginConsolePanelCloseRestart() {
+        if (consolePanelCloseRestartInProgress) return;
+        consolePanelCloseRestartInProgress = true;
+        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES,
+                MODE_PRIVATE);
+        preferences.edit().remove(WebDebugPolicy.IN_APP_CONSOLE_PANEL_REQUEST_PREFERENCE).commit();
+        final int oldPid = android.os.Process.myPid();
+        Intent restart = new Intent(this, ProfileRestartActivity.class);
+        restart.putExtra(ProfileRestartActivity.EXTRA_OLD_PID, oldPid);
+        restart.putExtra(ProfileRestartActivity.EXTRA_DEBUG_RESTART, true);
+        restart.putExtra(ProfileRestartActivity.EXTRA_RESTART_STATE, buildTabRestartState());
+        restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        try {
+            startActivity(restart);
+        } catch (RuntimeException error) {
+            preferences.edit().putBoolean(WebDebugPolicy.IN_APP_CONSOLE_CLEANUP_FAILED_PREFERENCE,
+                    true).commit();
+            Toast.makeText(this, R.string.in_app_console_restart_failed, Toast.LENGTH_LONG).show();
+            GeckoViewBrowserAdapter.shutdownForConsolePanelClose(success ->
+                    android.os.Process.killProcess(oldPid));
+            return;
+        }
+        dismissOverflowMenuSafely();
+        if (settingsDialog != null && settingsDialog.isShowing()) settingsDialog.dismiss();
+        if (developerDebugDialog != null && developerDebugDialog.isShowing()) {
+            developerDebugDialog.dismiss();
+        }
+        finishAndRemoveTask();
+        GeckoViewBrowserAdapter.shutdownForConsolePanelClose(success -> {
+            if (!success) {
+                preferences.edit().putBoolean(WebDebugPolicy.IN_APP_CONSOLE_CLEANUP_FAILED_PREFERENCE,
+                        true).commit();
+            }
+            android.os.Process.killProcess(oldPid);
+        });
+    }
+
+    @android.annotation.SuppressLint("ApplySharedPref")
+    private boolean beginRemoteDebugRuntimeRestart(boolean enabled) {
+        android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES,
+                MODE_PRIVATE);
+        boolean previous = preferences.getBoolean(WebDebugPolicy.REMOTE_DEBUGGING_PREFERENCE,
+                WebDebugPolicy.REMOTE_DEBUGGING_DEFAULT);
+        if (previous == enabled) return true;
+        if (!preferences.edit().putBoolean(WebDebugPolicy.REMOTE_DEBUGGING_PREFERENCE, enabled).commit()) {
+            Toast.makeText(this, R.string.remote_debug_save_failed, Toast.LENGTH_LONG).show();
+            return false;
+        }
+
+        final int oldPid = android.os.Process.myPid();
+        Intent restart = new Intent(this, ProfileRestartActivity.class);
+        restart.putExtra(ProfileRestartActivity.EXTRA_OLD_PID, oldPid);
+        restart.putExtra(ProfileRestartActivity.EXTRA_DEBUG_RESTART, true);
+        restart.putExtra(ProfileRestartActivity.EXTRA_RESTART_STATE, buildTabRestartState());
+        restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        try {
+            startActivity(restart);
+        } catch (RuntimeException error) {
+            preferences.edit().putBoolean(WebDebugPolicy.REMOTE_DEBUGGING_PREFERENCE,
+                    previous).commit();
+            Toast.makeText(this, R.string.remote_debug_restart_failed, Toast.LENGTH_LONG).show();
+            return false;
+        }
+
+        dismissOverflowMenuSafely();
+        if (settingsDialog != null && settingsDialog.isShowing()) settingsDialog.dismiss();
+        if (developerDebugDialog != null && developerDebugDialog.isShowing()) {
+            developerDebugDialog.dismiss();
+        }
+        GeckoViewBrowserAdapter.shutdownForProfileSwitch();
+        finishAndRemoveTask();
+        new Handler(Looper.getMainLooper()).postDelayed(
+                () -> android.os.Process.killProcess(oldPid), 800L);
+        return true;
+    }
+
+    private Bundle buildTabRestartState() {
+        Bundle state = new Bundle();
+        List<BrowserTabRegistry.Tab> openTabs = tabRegistry.all();
+        String[] ids = new String[openTabs.size()];
+        for (int i = 0; i < openTabs.size(); i++) {
+            BrowserTabRegistry.Tab tab = openTabs.get(i);
+            ids[i] = tab.id;
+            BrowserTabSession session = browserSessions.get(tab.id);
+            String url = session == null ? tab.url : session.browser.getUrl();
+            if (!isWebUrlString(url)) url = tab.url;
+            boolean showingHome = tab.showingHome || !isWebUrlString(url);
+            state.putString(STATE_TAB_URL_PREFIX + tab.id, showingHome ? "" : url);
+            state.putString(STATE_TAB_TITLE_PREFIX + tab.id, tab.title);
+            state.putBoolean(STATE_TAB_HOME_PREFIX + tab.id, showingHome);
+            if (!showingHome) {
+                state.putByteArray(STATE_TAB_STATE_PREFIX + tab.id,
+                        url.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        }
+        state.putStringArray(STATE_TAB_IDS, ids);
+        BrowserTabRegistry.Tab selected = tabRegistry.selected();
+        if (selected != null) state.putString(STATE_SELECTED_TAB, selected.id);
+        return state;
     }
 
     private void showContentProtectionDetails() {
@@ -2037,6 +2014,7 @@ public final class MainActivity extends Activity {
                 && savedState.getByteArray(STATE_TAB_STATE_PREFIX + tab.id) != null
                 && siteMode == SiteMode.Mode.DESKTOP;
         configureBrowserSession(session);
+        browser.setConsoleEntryHandler(this::onConsoleEntry);
 
         byte[] navigationState = savedState == null ? null
                 : savedState.getByteArray(STATE_TAB_STATE_PREFIX + tab.id);
@@ -2098,8 +2076,16 @@ public final class MainActivity extends Activity {
         browser.setLoadHandler(new GeckoViewBrowserAdapter.LoadHandler() {
             @Override
             public void onLoadStart(String url) {
+                String previousPage = session.currentPageUrl;
                 session.currentPageUrl = url;
-                runOnUiThread(() -> handleTabLoadStart(session, url));
+                runOnUiThread(() -> {
+                    if (consolePanelOpen && tab == activeTab()
+                            && !Objects.equals(previousPage, url)) {
+                        webConsoleBuffer.clear();
+                        refreshConsolePanel();
+                    }
+                    handleTabLoadStart(session, url);
+                });
             }
 
             @Override
@@ -3576,6 +3562,7 @@ public final class MainActivity extends Activity {
             session.browser.getSurfaceContainer().setVisibility(visible ? View.VISIBLE : View.GONE);
             session.browser.setPageVisible(visible);
         }
+        updateConsoleCaptureForSessions();
         boolean showHome = active == null || (active.showingHome && !active.failed);
         if (wallpaperBackdrop != null) wallpaperBackdrop.setVisibility(showHome ? View.VISIBLE : View.GONE);
         if (wallpaperScrim != null) wallpaperScrim.setVisibility(showHome ? View.VISIBLE : View.GONE);
@@ -3689,6 +3676,7 @@ public final class MainActivity extends Activity {
         outState.putStringArray(STATE_TAB_IDS, ids);
         BrowserTabRegistry.Tab selected = tabRegistry.selected();
         if (selected != null) outState.putString(STATE_SELECTED_TAB, selected.id);
+        outState.putBoolean(STATE_CONSOLE_PANEL_OPEN, consolePanelOpen);
         super.onSaveInstanceState(outState);
     }
 
@@ -3699,12 +3687,13 @@ public final class MainActivity extends Activity {
         refreshDailyWallpaper();
         wallpaperRotationChecksActive = true;
         wallpaperRotationHandler.removeCallbacks(wallpaperRotationCheck);
-        wallpaperRotationHandler.postDelayed(wallpaperRotationCheck, 60_000L);
+        wallpaperRotationHandler.postDelayed(wallpaperRotationCheck, WALLPAPER_REFRESH_INTERVAL_MILLIS);
         BrowserTabRegistry.Tab active = activeTab();
         for (BrowserTabSession session : browserSessions.values()) {
             session.browser.onResume();
             session.browser.setPageVisible(session.tab == active && !session.tab.showingHome);
         }
+        updateConsoleCaptureForSessions();
     }
 
     @Override
@@ -3712,6 +3701,13 @@ public final class MainActivity extends Activity {
         activityResumed = false;
         wallpaperRotationChecksActive = false;
         wallpaperRotationHandler.removeCallbacks(wallpaperRotationCheck);
+        if (consolePanelOpen) {
+            for (BrowserTabSession session : browserSessions.values()) {
+                session.browser.setConsoleCaptureActive(false);
+            }
+            webConsoleBuffer.clear();
+            refreshConsolePanel();
+        }
         for (BrowserTabSession session : browserSessions.values()) session.browser.onPause();
         super.onPause();
     }
@@ -3727,15 +3723,24 @@ public final class MainActivity extends Activity {
         }
     }
 
+    @android.annotation.SuppressLint("ApplySharedPref")
     @Override
     protected void onDestroy() {
         activityResumed = false;
+        suppressConsoleCloseRestart = true;
+        boolean uninstallConsoleOnDestroy = !isChangingConfigurations()
+                && GeckoViewBrowserAdapter.isConsoleExtensionReady();
+        closeConsolePanelAndClear();
+        GeckoViewBrowserAdapter.setConsoleSetupListener(null);
         dismissOverflowMenuSafely();
         if (searchEngineDialog != null && searchEngineDialog.isShowing()) {
             searchEngineDialog.dismiss();
         }
         if (tabSwitcherDialog != null && tabSwitcherDialog.isShowing()) tabSwitcherDialog.dismiss();
         if (settingsDialog != null && settingsDialog.isShowing()) settingsDialog.dismiss();
+        if (developerDebugDialog != null && developerDebugDialog.isShowing()) {
+            developerDebugDialog.dismiss();
+        }
         if (pluginManagerDialog != null && pluginManagerDialog.isShowing()) {
             pluginManagerDialog.dismiss();
         }
@@ -3745,7 +3750,6 @@ public final class MainActivity extends Activity {
         if (extensionManagerDialog != null && extensionManagerDialog.isShowing()) {
             extensionManagerDialog.dismiss();
         }
-        if (wallpaperDialog != null && wallpaperDialog.isShowing()) wallpaperDialog.dismiss();
         if (controlledCrawlerUi != null) controlledCrawlerUi.dismiss();
         if (profileManagerDialog != null && profileManagerDialog.isShowing()) profileManagerDialog.dismiss();
         searchEngineFilterHandler.removeCallbacksAndMessages(null);
@@ -3757,6 +3761,13 @@ public final class MainActivity extends Activity {
             closeBrowserSession(session);
         }
         browserSessions.clear();
+        if (uninstallConsoleOnDestroy && !consolePanelCloseRestartInProgress) {
+            GeckoViewBrowserAdapter.shutdownForConsolePanelClose(success -> {
+                if (!success) getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE).edit()
+                        .putBoolean(WebDebugPolicy.IN_APP_CONSOLE_CLEANUP_FAILED_PREFERENCE, true)
+                        .commit();
+            });
+        }
         super.onDestroy();
     }
 }

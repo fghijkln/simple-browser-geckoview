@@ -1,0 +1,36 @@
+PASS: versioned JSON structure, 21 stable built-ins, unique ids, exact categories, 521-item filtering, selection compatibility, icon fallback/provenance, HTTPS templates, query encoding, and custom persistence
+PASS: MV3 manifest metadata review, bounded ZIP validation, path/traversal defense, private retention/removal; no third-party extension execution is claimed or tested
+PASS: persisted GeckoView mobile/desktop mode sentinel; no fabricated engine UA
+PASS: separate tab URL/title/loading state, switching, close selection, final-close replacement, and duplicate-ID rejection
+PASS: supported overflow menu groups/actions, navigation states, phone/desktop and read-only extension label, and no unsupported menu entries
+PASS: history ordering and duplicate updates
+PASS: HTTP(S)-only bookmark validation and duplicate handling
+PASS: local persistence round-trip
+PASS: history deletion remains separate from bookmarks
+PASS: history retention cap
+PASS: malformed local storage is ignored
+PASS: no network requests or external DNS queries
+PASS: schema-versioned zero-profile fallback and visible template provenance
+PASS: two profiles have distinct app-private storage roots
+PASS: path traversal is rejected and names stay out of filesystem paths
+PASS: crash-safe delete tombstone removes cookies/cache/site storage and metadata
+PASS: recursive deletion and at-least-one-profile invariant
+PASS: valid but empty metadata recovers a default profile
+PASS: orphaned incomplete profile creation is reconciled
+PASS: metadata/directory lifecycle only; GeckoView runtime filesystem isolation requires Android device verification
+PASS: default-on persisted WebRTC policy
+PASS: experimental native peer-connection preference and fail-closed navigation gate
+PASS: strict ETP, HTTPS-only, Quad9 TRR-only, and manual system/site permission gates
+PASS: no cleartext traffic, no automatic Android permission request, pinned engine and transparent limitations
+PASS: source-only checks; no runtime, public detector, or external DNS query was used
+PASS: edge-to-edge wallpaper/status bar with inset-safe controls, compact menu, 48dp tab counter, chevron-free engine picker, non-interactive forced-rotation disclosure, no wallpaper selection UI, and sparse home regressions
+PASS: seven decodable 1440x2560 wallpapers; adjacent-date advancement; fixed same-day mapping; exact seven-day cycle; timezone/date recalculation; foreground midnight refresh; no wallpaper picker or switch UI
+PASS: overflow quick-action cards and menu sections do not register 壁纸, and the dispatcher has no chooser route for a stale wallpaper action ID
+Web debug policy smoke test: PASS (both features default off; explicit panel request gates install; metadata-only capture; Android privileges unchanged)
+Web console metadata smoke test: PASS (no text/URL/wall-time fields, 500-event cap, elapsed rate limit, clear, UI/native allowlist)
+Web console privacy tests: PASS (sensitive sentinel strings absent from MAIN/ISOLATED IPC; exact metadata allowlist; opt-in/disable; errors; no page-data reads)
+PASS: exact optional permission allowlist; no broad media/sensor permissions
+PASS: camera and microphone hardware features are explicitly optional
+PASS: no Android dangerous-permission request API in application Java source
+PASS: GeckoView requests are checked; missing/unsupported cases can be denied
+PASS: generic file paths retain the system document picker; no wallpaper picker path remains

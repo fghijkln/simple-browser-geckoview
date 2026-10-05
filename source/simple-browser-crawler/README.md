@@ -1,62 +1,18 @@
-# 简浏览（Android）2.6.0
+# 简浏览 Android 源码工程（v0.5 / 2.8.1）
 
-本项目是一个简体中文 Android 浏览器，内核为 Mozilla GeckoView Stable `157.0.20260924084938`，不使用系统 WebView，也不包含 Cefrium、CEF、Chromium runtime 或 `libcef.so`。APK 中出现 Mozilla GeckoView 自有 native 库（例如 `libxul.so`、`libmozglue.so`）属于预期：它们是 Gecko 引擎，不是 Chromium。版本、Maven 坐标、Android 要求、安全 API 与许可证来源见 [`docs/GECKOVIEW-OFFICIAL-RESEARCH.md`](docs/GECKOVIEW-OFFICIAL-RESEARCH.md)。
+本目录是公开发行 **v0.5**（应用版本 **2.8.1 / versionCode 18**）的完整 Android Gradle 工程。仓库根目录的[双语项目说明](../../README.md)提供下载、功能摘要与验证范围；[双语发行说明](../../RELEASE-NOTES-v0.5.md)记录此次壁纸与网页调试变化。
 
-## 浏览器功能
+新标签页包含七张离线内置壁纸，按设备当前时区的本地日历日期强制每日轮换，没有手动切换入口。开发者设置中的 USB/ADB Firefox DevTools 和页内 Console/Errors 面板均默认关闭。Console 扩展只会在用户明确打开面板时安装，且需接受所有 HTTP/HTTPS 网站的 host permission；面板只在内存保留受限 metadata，不采集日志正文或页面 URL。关闭会清空、卸载并重启 Runtime。细节与限制见[中文网页调试说明](docs/WEB-DEBUGGING.md)、[English guide](docs/WEB-DEBUGGING.en.md)及[网页调试 API 审计](evidence/GECKOVIEW-WEB-DEBUG-API-AUDIT.md)。
 
-- 原生新标签页、标签切换、后退/前进、停止/刷新、主页，以及带用户手势的 HTTP(S) 弹窗在新标签页打开。标签在当前所选环境中共用一个 GeckoRuntime；环境管理器通过关闭会话并重启 app process 切换 profile。当前没有跨设备同步。项目没有独立验证 GeckoView 内部遥测/远程配置网络行为，不据此断言引擎没有后台连接。
-- 地址栏接受网址或搜索词。搜索目录包含 **502 项**，支持多级分类、功能筛选及访问方式筛选；21 个常用引擎图标随 APK 本地提供。自定义搜索引擎只保存 HTTPS URL 模板，不下载或执行代码。
-- 菜单另有独立的 **受控网页抓取 · 第二信息源**：只抓用户主动提供的 HTTPS 公开页面及同源链接，最多 4 页、总时限 90 秒、每页最多 1 MiB、串行且至少间隔 2 秒；robots.txt 规则仅内存缓存 5 分钟，只抽取静态 HTML/纯文本标题、短摘要和来源网址。抓取器不执行脚本，不使用浏览器 Cookie/登录会话；遇到拒绝、限流、挑战页或访问墙即停止。它不是通用搜索引擎，也不承诺全面克服反爬。
-- 提供 profile 级本地浏览历史、书签与网站手机/电脑版请求模式，以及搜索模板管理、设置和开源许可证查看。电脑版模式只更换 GeckoView User-Agent，不模拟桌面视口。环境管理支持新建、切换、改名、查看配置摘要和双重确认删除；切换会关闭当前标签。
-- 新标签页包含 14 张离线壁纸，支持本机照片选择和每日轮换；不从网络下载壁纸。
-- HTTPS 下载保存到设备下载目录，并拒绝非 HTTPS、超过 256 MiB 或无法完整写入的文件。
-- MV3 扩展 ZIP 只可导入、查看声明并移除；不会安装、授予其权限或执行其中代码。Firefox 扩展运行时并未实现，GeckoView 扩展 Web API 也关闭。
+Android Manifest 与应用特权守卫沿用 v0.4 的已审阅实现；网页调试和每日轮换没有新增 Android 权限。Release APK 使用项目保留的 Android Debug 签名证书，不是应用商店生产密钥。离线构建或静态检查不等于真机验证；本版没有设备实测网页调试连接或壁纸呈现。完整测试和校验记录见仓库根目录的[构建报告](../../BUILD-REPORT.md)。
 
-## 环境隔离的含义与边界
+## 本地构建
 
-每个环境有独立随机 UUID，Gecko 启动参数 `-profile` 指向 `filesDir/fingerprint-profiles/<UUID>/`；可编辑名称不参与文件路径。历史/书签/UA 请求模式按 profile 保存。切换在新进程中重建 GeckoRuntime；旧版默认 Gecko profile 和旧共享历史/书签不自动迁移或删除。Android backup 与 device-transfer 数据规则排除 app-private 文件、数据库和偏好。
-
-GeckoView 157 没有公开的 dedicated Java multi-profile API；实现依赖官方通用 Runtime `arguments(...)` 向 Gecko 主进程传递 `-profile`。官方 API 依据与限制见 [`docs/GECKOVIEW-PROFILE-API-AUDIT.md`](docs/GECKOVIEW-PROFILE-API-AUDIT.md)。环境是本地资料分区，不是不同 Android 设备：OS/build、Gecko 引擎、硬件/图形、屏幕和字体等可见特征可能共享。locale/timezone 是每个环境创建时的系统快照，默认 UA 为 GeckoView 移动模式；模板是可查证的来源信息，不通过硬件伪造声称构造不同指纹，也不针对 anti-fraud/anti-bot 绕过。
-
-删除使用 durable tombstone，先清除环境自己的偏好元数据，再递归移除 UUID Gecko 目录；异常时启动后重试。行为说明与未验证范围见 [`docs/FINGERPRINT-PROFILES.md`](docs/FINGERPRINT-PROFILES.md)。**本轮没有 Android 设备或 AVD，尚未实测 GeckoView 是否将 Cookie、缓存和站点存储实际写入各自的 `-profile` 目录，不能把离线目录测试等同真机隔离验证。**
-
-## 隐私与安全设置
-
-应用创建 GeckoRuntime 时启用 GeckoView **ETP Strict、AntiTracking Strict、严格社交跟踪保护和查询参数剥离**，并打开 Global Privacy Control。它不再打包旧的六域名本地过滤表或 Public Suffix List，也没有经过验证的逐站例外界面；原生 ETP 的具体规则来自 GeckoView，并可能影响登录、嵌入内容或结账页面。严格跟踪保护不是 Cookie/存储隔离、防指纹或全面的匿名化保证。
-
-GeckoView 配置为 HTTPS-only，并设置 `TRR_MODE_ONLY` 与 Quad9 DoH 地址 `https://dns.quad9.net/dns-query`。这让 Gecko 的常规名称解析优先只尝试该 DoH resolver，而不使用普通 native DNS 回退；Mozilla 同时列出 excluded domains、网络 DNS suffix、captive-portal/IPv6 能力探测、`/etc/hosts` 和 bootstrap 等例外。源代码配置不等于真机流量验证，应用状态也明确显示 **“GeckoView DNS 路径未验证”**。DoH 不隐藏访问网站的 IP 连接、不会解析 IP 字面地址，也不控制网站自有 DoH/DoT 或应用外流量。
-
-Quad9 的[数据与隐私政策](https://quad9.net/privacy/policy/)（版本 1.1，2026-06-24）称，服务必须在内存中短暂处理回复地址后即删除，不记录用户 IP；该政策也允许保留长期聚合计数，其中可能含查询标签及首次/最近时间，并说明它不会把这些数据关联到单个用户。查询域名仍会交给 Quad9 解析；DoH 是传输加密，不是匿名化。政策范围和元数据边界见 [`docs/NETWORK-PRIVACY-AUDIT.md`](docs/NETWORK-PRIVACY-AUDIT.md) 与 [`docs/QUAD9-DATA-BOUNDARY.md`](docs/QUAD9-DATA-BOUNDARY.md)。
-
-WebRTC PeerConnection 防护默认开启：应用通过 Mozilla 标记为 **Experimental** 的 `GeckoPreferenceController` 请求关闭 `media.peerconnection.enabled`。若偏好设置 API 返回失败，应用会关闭网页 JavaScript 作为 fail-closed 回退；成功返回也不等于真机 ICE 流量已验证。应用声明可选摄像头、麦克风和位置权限，但只读取 Android 当前授权状态，从不主动调用危险权限运行时申请 API。用户须到系统“设置 > 应用 > 简浏览 > 权限”手动授予；缺少权限时相关网页请求会被拒绝并提示，普通浏览继续。系统授权后，网站仍需单独确认。该设置不是网络层 UDP 隔离，不承诺零 WebRTC/IP 泄漏。
-
-可选 DNS-only VPN 是独立实验原型，需 Android 显示系统授权；它只尝试处理发往指定 DNS resolver 地址的端口 53 流量，不接管通用流量。VPN 图标或 DoH 请求成功都不能证明 GeckoView 的 DNS 已进入该隧道。没有访问公网 DNS/WebRTC 泄漏检测站，也没有向 Quad9 发送测试查询；DoH 测试使用 loopback HTTPS mock。
-
-## 应用自身特权守卫
-
-本版本在应用启动、Activity 恢复前及 DNS-only VPN 服务启动时，对**本应用自身**执行 fail-closed 检查：合并后的权限请求清单必须符合审阅过的 allowlist；危险权限、特殊 App Ops、设备管理、无障碍与通知监听等本应用特权状态必须符合策略；应用进程 UID 不能是 root 或 shell，且有效 Linux capabilities（`CapEff`、`CapPrm`、`CapInh`、`CapAmb`）必须可读并为零。所需系统状态无法读取或无法解析时，应用停止继续启动。审计细节见 [`docs/PRIVILEGE-GUARD-AUDIT.md`](docs/PRIVILEGE-GUARD-AUDIT.md)。
-
-守卫只检查本应用及当前进程，**不检查整台设备是否 root**，也不能对抗已控制内核/操作系统、被修改的系统 API 或运行时注入。它不是后台持续监视器：在应用仍运行时发生的外部变化，通常要到下一次上述检查点才会被发现。GeckoView 157 的 isolated content process 与全站点 Fission 是显式配置层面的隔离增强；没有连接设备或模拟器，未验证其真机运行效果。
-
-受控抓取器单独使用 Android Java HTTP(S) 连接和系统名称解析，不继承 GeckoView 的 Quad9 TRR-only 配置，也不保证经过 DNS-only VPN；输入页和每次重定向会校验 HTTPS/同源范围，并拒绝可识别的本机、私有和特殊用途 IP 地址。DNS 预检与连接之间仍存在系统解析/时间差边界，因此 UI 不声称同等 DNS 隐私。robots.txt 是抓取规则而不是访问授权；公开可读也不自动授予复制或再发布权。规范与实际行为及尚未覆盖的页面类型见 [`docs/CRAWLER-IMPLEMENTATION-REPORT.md`](docs/CRAWLER-IMPLEMENTATION-REPORT.md)。
-
-## 手动 Android 权限与设备能力
-
-摄像头、麦克风和定位是可选的危险权限，只在 APK Manifest 中声明，不由应用主动申请或弹出 Android 授权框。camera、camera.any、autofocus 和 microphone 硬件特性也明确设为非必需，避免 Android/Google Play 因权限声明过滤无相应硬件的设备。用户须到“设置 > 应用 > 简浏览 > 权限”手动授予；缺少权限或对应媒体硬件时，相关网页请求会被拒绝，普通浏览继续。完成系统授权后，网页媒体或定位请求还会出现独立的站点确认。GeckoView 会保存站点决定；本版没有单独的逐站权限管理页，用户可随时在 Android 应用权限中撤销对应的应用级授权。
-
-选择壁纸、网页上传文件或导入扩展 ZIP 使用 Android 系统文档选择器的单项 URI 授权，不申请 `READ_MEDIA_*` 或广泛存储权限。Android 没有可在“应用权限”中单独授予的常规剪贴板运行时权限；复制/粘贴依赖系统与 GeckoView 集成及 Android 前台访问规则。项目 Android 层没有 `SensorManager` 调用，不实现步数/活动识别或心率等身体传感器功能，因而不声明 `ACTIVITY_RECOGNITION`、`BODY_SENSORS` 或 `BODY_SENSORS_BACKGROUND`。普通加速度计/陀螺仪不应误归为身体传感器权限；GeckoView 网页运动传感器接口未在设备上验证，不作支持承诺。屏幕捕获和未在支持清单内的 GeckoView 权限请求会被拒绝。详细核对见 [`docs/MANUAL-PERMISSIONS-AND-SENSORS.md`](docs/MANUAL-PERMISSIONS-AND-SENSORS.md)。
-
-GeckoView 官方许可为 MPL-2.0，构建依赖还包括 Apache-2.0 组件。许可证文本与第三方通知随 APK 提供。GeckoView 对应源码获取链接与再分发说明见上述官方资料记录及 APK 内 `THIRD-PARTY-NOTICES.txt`；Mozilla 与 GeckoView 均不对本项目品牌作背书。
-
-## 构建与本地测试
-
-需要 JDK 21、Gradle Wrapper 9.7.1、Android Gradle Plugin 9.4.0 以及 Android SDK API 37（本项目使用 minor SDK 2）。最低 Android 版本为 API 29，目标 API 35；仅生成 `arm64-v8a` 与 `x86_64` 两个 APK，不生成通用包。默认构建输出到仓库同级的 `simple-browser-crawler-build/gradle/`；可设置 `SIMPLE_BROWSER_BUILD_ROOT` 更改该目录。
+需要 JDK 21、Gradle Wrapper 9.7.1、Android Gradle Plugin 9.4.0 和 Android SDK API 37（minor 2）；`minSdk 29`、`targetSdk 35`，输出仅包括 `arm64-v8a` 和 `x86_64` 两个 ABI。
 
 ```bash
 bash tools/run-geckoview-local-tests.sh
-bash tools/run-dns-doh-local-test.sh
-bash tools/run-crawler-local-mock.sh
 ./gradlew --no-daemon :app:lintRelease :app:assembleRelease
 ```
 
-Release 任务使用项目现有的 Android debug signing key，**不是应用商店生产签名**；候选构建须与 v0.3 APK 的证书指纹匹配。APK 核验、哈希、lint/build 日志和运行限制随构建报告提供。当前没有连接的 Android 设备或模拟器，因此构建与离线测试不代表已安装、启动或真机网络行为通过。
+项目包含搜索目录、受控抓取、Profile、壁纸轮换、权限策略和网页调试的离线回归测试。关于应用自身特权检查的适用范围，见[特权守卫审计](docs/PRIVILEGE-GUARD-AUDIT.md)。

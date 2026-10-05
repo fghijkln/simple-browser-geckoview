@@ -1,0 +1,26 @@
+# Web debugging guide (English)
+
+## Remote debugging over USB/ADB
+
+Remote debugging is off by default. In the app, open **Settings → Developer debugging** and enable **Firefox DevTools USB/ADB remote debugging**. GeckoView reads this setting when its Runtime is created, so the app restarts the browser engine and attempts to restore open tab URLs; per-tab back/forward history and transient page state are reset.
+
+1. In Android system settings, enable Developer options and USB debugging, connect the development computer by USB, and authorize only a computer you trust.
+2. On desktop Firefox, open `about:debugging`, go to **Setup**, and select **Enable USB Devices**.
+3. Connect the device under **USB Devices**, find the Cue/GeckoView page target, and select **Inspect**. Target names vary by Firefox version.
+4. When finished, return to the app and turn the setting off. The Runtime restarts and the old debugging endpoint exits with it.
+
+A remote-debugging peer can inspect and manipulate the current page, including reading its DOM and examining page state. Use a trusted development computer and disable this mode when done. It is separate from the privacy-first in-app panel below; remote DevTools grants the connected peer much broader inspection capability. The setting configures GeckoView's USB/ADB `remoteDebuggingEnabled`; it does not open a Wi-Fi/LAN listener, add Android permissions, set `android:debuggable`, or add a persistent service. See Mozilla's [about:debugging USB guide](https://firefox-source-docs.mozilla.org/devtools-user/about_colon_debugging/index.html) and [GeckoRuntimeSettings API](https://mozilla.github.io/geckoview/javadoc/mozilla-central/org/mozilla/geckoview/GeckoRuntimeSettings.Builder.html).
+
+## Privacy-first in-app Console / Errors panel
+
+Two explicit steps are required. Enabling **Allow in-app Console panel** in **Settings → Developer debugging** records consent only; it does not install or inject the extension. Only then clicking **Open current tab Console panel (install and restart)** installs the APK-bundled GeckoView WebExtension. The nearby UI discloses the permission before installation. The extension receives host permission for all `http://*/*` and `https://*/*` pages, broader than the actual capture behavior. Closing the panel stops capture, clears the buffer, closes GeckoSessions, uninstalls the extension, and restarts the Runtime. The app attempts to restore tab URLs, but browsing history and transient page state are reset. Without consent and a one-shot explicit panel-open request, startup installs no extension and removes any stale copy before restoring pages.
+
+The panel applies only to the selected GeckoSession's HTTP(S) **top-level frame**. For `console.log`, `console.warn`, and `console.error`, it records only a fixed category, level, and argument count (capped at 64). Uncaught JavaScript errors and unhandled rejections produce only their fixed error category and level. The extension does not read or forward console argument values, error messages, rejection reasons, stacks, file names/paths, line numbers, page URLs, DOM, forms, input values, cookies, or request/response contents. Raw strings, objects, properties, and values do not enter page messages, native-messaging payloads, Java event objects, the buffer, or the UI.
+
+Rows show only a locally generated relative sequence number, fixed category, level, and argument count. **No wall-clock timestamp, page URL, or source identity is recorded.** The in-memory buffer retains at most 500 metadata events, intake is capped at 60 events per second, and the **Clear** button resets both records and the local ordinal. Closing the panel, switching tabs, or pausing the app stops capture and clears the buffer. No other data is written to history, preferences, files, Android logcat, or the network.
+
+The implementation uses GeckoView-supported MAIN-world and ISOLATED-world WebExtension content scripts, not DOM `<script>`, `evaluateJS`, or `eval` injection; see Mozilla's [GeckoView WebExtensions guide](https://firefox-source-docs.mozilla.org/mobile/android/geckoview/consumer/web-extensions.html) and [content-script documentation](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/content_scripts). A page can forge category, level, and argument-count metadata, so this is not a trusted audit record; the panel will not show forged free text. The native side locally validates the fixed extension ID, content-script environment, top-frame flag, GeckoSession, and current HTTP(S) origin using GeckoView `MessageSender` metadata. Origin/URL is used only for a boolean check and is never copied into a message, log, or UI.
+
+## Verification boundary
+
+Offline tests inject sensitive sentinel values (email, token, password, error/stack/path/URL, DOM/cookie/request/response text) and assert that none enter either message channel; they also test default-off and one-shot open gating, limits, clear behavior, and native/UI field allowlists. Script tests do not verify injection in a real Gecko Runtime or DevTools connectivity. No Android device or emulator was available, so real-device Console capture and USB/ADB connectivity are not claimed as runtime-verified.

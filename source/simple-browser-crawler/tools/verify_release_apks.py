@@ -82,7 +82,7 @@ def main():
         badging = run([AAPT, "dump", "badging", apk])
         package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging, re.M)
         assert package, "aapt did not report package/version"
-        assert package.groups() == ("com.cue.simplebrowser", "15", "2.6.0"), f"Unexpected app metadata: {package.groups()}"
+        assert package.groups() == ("com.cue.simplebrowser", "18", "2.8.1"), f"Unexpected app metadata: {package.groups()}"
         abi_badging = re.search(r"^native-code: (.*)$", badging, re.M)
         assert abi_badging and expected_abi in abi_badging.group(1), f"aapt ABI mismatch for {apk.name}"
         align = run([ZIPALIGN, "-c", "-p", "4", apk])
@@ -95,7 +95,7 @@ def main():
         assert certificate, "APK signer certificate SHA-256 was not reported"
         certificate_sha256 = certificate.group(1).replace(":", "").lower()
         assert certificate_sha256 == "e82931a4c130f749fe03fa6f6b530007d03a7b00f003aea47cdc3d0f69e28dfd", \
-            f"APK signer does not match v0.3 debug certificate: {certificate_sha256}"
+            f"APK signer does not match the retained v0.4 debug certificate: {certificate_sha256}"
         zip_test = run(["unzip", "-t", apk])
         assert "No errors detected" in zip_test, f"ZIP integrity test failed: {apk.name}"
         native, dex = scan_zip(apk, expected_abi)
@@ -106,7 +106,7 @@ def main():
             f"SHA-256: {digest}",
             f"Package/version: {package.group(1)} {package.group(3)} (versionCode {package.group(2)})",
             f"ABI: {expected_abi}",
-            f"Signing certificate SHA-256: {certificate_sha256} (v0.3 Android Debug key)",
+            f"Signing certificate SHA-256: {certificate_sha256} (v0.4-compatible Android Debug key)",
             "Signature schemes: " + "; ".join(line.strip() for line in signature.splitlines() if "Verified using" in line),
             "ZIP alignment: 4-byte native alignment PASS; 16-KB page alignment PASS",
             f"Mozilla Gecko native libraries ({len(native)}): " + ", ".join(name.rsplit("/", 1)[-1] for name in native),

@@ -1,114 +1,53 @@
-# 简浏览 / Simple Browser (Android)
+# 简浏览（Android）
 
-**对外发布版本：v0.4** · **应用内部版本：2.6.0（versionCode 15）**
-**Public release: v0.4** · **Application version: 2.6.0 (versionCode 15)**
+**公开发行：v0.5** · **应用版本：2.8.1（versionCode 18）**
+简浏览是一款使用 Mozilla GeckoView Stable `157.0.20260924084938` 的 Android 浏览器。发行标签与应用版本号是两套编号；上一公开版为 [v0.4（应用版本 2.6.0）](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.4)。
 
-简浏览是一款简体中文 Android 浏览器，使用 Mozilla GeckoView Stable `157.0.20260924084938`。本次检查的 APK 中未发现 Chromium 或 CEF；`libxul.so`、`libmozglue.so` 等是 GeckoView 的 Mozilla 引擎组件。上一公开版本为 [v0.3（应用版本 2.5.0 / versionCode 14）](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.3)，其标签与发行资产保留不变。
+## 下载
 
-Simple Browser is a Simplified Chinese Android browser built on Mozilla GeckoView Stable `157.0.20260924084938`. The inspected APKs contain no Chromium or CEF; `libxul.so` and `libmozglue.so` are Mozilla GeckoView engine components. The previous public release was [v0.3 (application version 2.5.0 / versionCode 14)](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.3); its tag and release assets remain unchanged.
+- [arm64-v8a APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-arm64-v8a.apk)
+- [x86_64 APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-x86_64.apk)
+- [源码、测试与审计 ZIP](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-source.zip) · [SHA-256 清单](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/checksums.txt)
+- [构建报告](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-BUILD-REPORT.md) · [应用特权守卫审计](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-PRIVILEGE-GUARD-AUDIT.md) · [网页调试 API 审计](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-WEB-DEBUG-API-AUDIT.md)
 
-## 下载 / Downloads
+APK 按 ABI 分开提供，没有通用 APK；最低 Android API 29、目标 API 35。
 
-- [arm64-v8a APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-arm64-v8a.apk)
-- [x86_64 APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-x86_64.apk)
-- [源码与测试 ZIP](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-source.zip) · [构建报告](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-BUILD-REPORT.md) · [权限守卫审计](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-PRIVILEGE-GUARD-AUDIT.md) · 仓库源码：[source/simple-browser-crawler/](source/simple-browser-crawler/)
+## v0.5 的变化
 
-These are ABI-specific APKs; there is no universal APK. Minimum Android API is 29 and target API is 35. SHA-256 values for the v0.4 release assets are listed in [`checksums.txt`](checksums.txt).
+新标签页固定内置七张离线壁纸，并按设备当前时区的本地日历日期**强制每日轮换**。同一天保持同一张图；切换到下一本地日期时前进一张并按七日循环。应用创建或回到前台时立即重算，前台停留期间每 60 秒检查一次。设置页只有说明，没有手动选择、暂停或即时换图入口；无需新增 Android 权限、闹钟或后台服务。
 
-## 功能与技术
+开发者设置还提供两项默认关闭的可选网页调试功能：GeckoView USB/ADB Firefox DevTools 远程调试，以及页内 Console/Errors 面板。远程调试连接方能够检查并操纵页面，只应连接可信设备并在使用后关闭。页内面板需先明确授权、再点击打开；届时会安装随 APK 提供的扩展并请求覆盖所有 HTTP/HTTPS 网站的 host permission。面板只保留固定类别、级别、参数数量及本地顺序号，不读取或显示日志正文、错误正文、堆栈、URL、DOM、表单输入、Cookie 或网络内容；数据只在内存，最多 500 条，清除或关闭即清空。页面可伪造这些有限 metadata，因此记录不是可信审计证据。关闭面板会卸载扩展并重启 Runtime；标签 URL 尽量恢复，但历史和临时页面状态会重置。详见[网页调试说明](source/simple-browser-crawler/docs/WEB-DEBUGGING.md)及[双语发行说明](RELEASE-NOTES-v0.5.md)。
 
-- 原生 Android 浏览器界面，支持标签、新标签页、前进/后退、刷新、主页、历史记录、书签和 HTTPS 下载。
-- 地址栏可输入网址或搜索词；内置 **502 项搜索目录**、21 个常用搜索引擎图标，以及自定义 HTTPS 搜索模板。抓取器与搜索目录分离。
-- 菜单中另有独立的**受控网页抓取第二信息源**：从用户主动输入的公开 HTTPS 页面及同源链接抽取静态文本；上限为每项任务 4 页、90 秒、每页 1 MiB，串行请求至少间隔 2 秒。抓取器不是通用搜索引擎，也不承诺绕过反爬或访问限制；细节见 [`source/simple-browser-crawler/docs/CRAWLER-IMPLEMENTATION-REPORT.md`](source/simple-browser-crawler/docs/CRAWLER-IMPLEMENTATION-REPORT.md)。
-- 新标签页提供 14 张离线壁纸；可选择本机照片并设置每日轮换。电脑版请求模式只更改 GeckoView User-Agent，不模拟桌面视口。
-- 本地环境管理器可创建、切换、改名、查看配置摘要和删除环境；切换会关闭当前标签。历史、书签和请求模式按环境保存。扩展 ZIP 仅供导入、查看声明和移除；Firefox 扩展运行时未实现，扩展代码不会执行。
-- 隐私设置采用 GeckoView 原生 Strict Tracking Protection、HTTPS-only，以及 Quad9 TRR-only：`https://dns.quad9.net/dns-query`。可选 DNS-only VPN 原型需要用户主动触发 Android 系统授权；它不是通用流量 VPN。
-- 摄像头、麦克风与定位为可选权限：应用只在 Manifest 声明，由用户去 Android 系统设置手动授予；应用不主动弹运行时授权框。摄像头、自动对焦和麦克风硬件特性显式设为非必需，因此无这些硬件仍可安装并进行基础浏览；缺少授权或硬件时只拒绝对应媒体请求，普通浏览继续；授予后仍须逐站确认。照片/文件选择使用系统文档选择器，不读取整个媒体库。本版新增只检查本应用自身的 fail-closed 特权守卫；它不检查整台设备是否 root，也不抵御已控制的内核/操作系统或运行时注入。详情见[`双语发行说明`](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.4)及 [`权限守卫审计`](source/simple-browser-crawler/docs/PRIVILEGE-GUARD-AUDIT.md)。
+## 保留能力与验证范围
 
-## 受控抓取范围与限制
+浏览器仍基于 GeckoView，保留受控抓取、搜索目录、网络隐私配置和应用自身特权守卫等原有项目功能；发行没有新增 Android Manifest 权限。详情见[完整 Android 源码与文档](source/simple-browser-crawler/)。
 
-抓取器只接受用户主动提交的公开 HTTPS 页面，只访问同源 HTTPS 默认端口页面；每条请求链最多跟随 3 次同源重定向，并逐跳检查目标。每项任务最多尝试 4 页、发现 12 个链接候选、总计 90 秒，每页正文最多 1 MiB；请求串行，默认至少间隔 2 秒，连接和读取超时各最多 8 秒。站点声明的 `Crawl-delay` 不超过 30 秒时会遵守；更长时停止。
-
-首次请求同站 `robots.txt`。成功取得的规则以及 404/410 的“未提供”结果仅在内存中缓存 5 分钟、最多 32 个站点；规则文件上限 512 KiB。抓取器支持常见 User-Agent 组、`Allow`、`Disallow`、`*` 和 `$`，不处理 sitemap，也不覆盖所有编码边缘。robots 规则不是访问授权；robots 不可达时停止，404/410 也不表示获得抓取许可。公开可读页面不自动授予复制或再发布权，仍须遵守站点条款及适用规则。
-
-仅支持静态 HTML、XHTML 和纯文本，提取标题、最多 240 字符摘要与来源 URL；不运行 JavaScript，不抓取图片、PDF、页面依赖或其他二进制内容，也不自动打开或发布结果。SPA 动态渲染、点击/滚动后加载、登录后页面和付费内容通常不适用。401/403、429、503 或其他服务端错误、跨站跳转、超限或不支持的内容都会停止；429 不自动重试。挑战页、CAPTCHA、登录墙和付费墙通过保守文本启发式检查，可能误报或漏报。
-
-抓取使用独立的 Android Java `HttpURLConnection` 和系统名称解析，不读取 GeckoView Cookie 或认证资料；抓取正文不写入持久缓存。不会使用代理、IP 轮换、浏览器登录态、指纹伪装或验证码绕过。输入及重定向目标会预检 HTTPS、默认端口和可识别的本机/私有/特殊用途地址，但 DNS 预检与实际连接之间仍有解析时差/重解析边界。GeckoView 的 Quad9 `TRR_MODE_ONLY` **不证明** Java HTTP 抓取也经由 Quad9 或 DNS-only VPN；本项目不宣称抓取器具有同等 DNS 隐私。
-
-## 环境隔离与隐私边界
-
-每个环境的数据目录位于 app-private 的 `filesDir/fingerprint-profiles/<UUID>/`。GeckoView 157 没有公开的 Java 多 profile API；本项目通过公开的通用 `arguments(...)` 接口传入 Gecko `-profile` 参数。这个实现仍属实验性：该参数在目标 Android 设备上的行为，以及 Cookie、缓存和站点存储是否真正写入各自目录，均未在设备上验证。因此不能把这些环境描述为完整或强隔离，也不建议用它们隔离高风险账号。
-
-v0.1 旧版默认浏览器数据没有迁移界面，也不会自动迁移或拆分到新环境。
-
-Locale 与时区是创建环境时读取的 Android 系统快照，不是独立设定；设备硬件、系统构建、GeckoView 引擎、图形、屏幕和字体等特征不会被伪装成不同设备。本应用不是反指纹设备，也不提供反自动化或反欺诈绕过能力。
-
-应用配置 GeckoView Strict tracking protection、HTTPS-only 和 Quad9 TRR-only，但配置本身不证明实际设备流量路径。DoH 查询会交给 Quad9 解析，也不等同匿名化。WebRTC 关闭使用 Mozilla 标为 **Experimental** 的 Gecko preference，未经设备上的 ICE/IP 泄漏测试。GeckoView DNS 是否经过 VPN 隧道同样未经设备验证；VPN 需要用户在 Android 系统界面授权。
-
-旧扩展不执行；跟踪防护由 GeckoView 原生功能承担，逐站例外选项有限或不可用。严格跟踪防护可能影响登录、嵌入内容或结账页面。抓取器不共享浏览器 Cookie，但这不代表连接的 DNS 路径已隔离或匿名化。
-
-## 验证与已知限制
-
-本次为 **build-only + offline tests**：完整本地回归与特权守卫静态检查通过，包含搜索目录、浏览器/Profile/ETP/DoH/WebRTC 模型和 crawler loopback mock 测试；DoH 测试使用本地 mock。Release lint 为 **0 errors、2 warnings**：targetSdk 35 与最新 Android API 建议，以及 minSdk 29 下冗余的 SDK 版本检查。未使用 Android 真机或模拟器，APK 未安装或启动；没有验证真实目标站点、真实反爬检测、设备 DNS 路径或运行时隔离效果。
-
-两个 APK 使用 Android **debug key** 签名，不是商店生产签名；证书 SHA-256 与 v0.3 两个 APK 一致。核验结果为 `v3=true`、`v2=false`，并通过 4-byte 与 16-KB 对齐检查。由不同密钥签名的既有安装可能无法覆盖升级。静态扫描未发现 Chromium/CEF 标记。构建或离线测试结果不代表已验证真机网络行为。
-
-GeckoView 官方许可为 MPL-2.0，构建依赖还包括 Apache-2.0 组件；对应第三方许可文本与通知随 APK 提供。项目根目录没有自定义的顶层 `LICENSE` 文件；这些第三方许可信息不构成对整个应用代码的统一许可声明。Mozilla 与 GeckoView 均不对本项目品牌作背书。
+构建和离线回归、APK 签名/ZIP/对齐及静态权限核验不代表真机验证。本版没有连接 Android 设备或模拟器，未声称实测网页 Console 捕获、DevTools 设备连接或设备上的壁纸呈现。APK 使用保留的 Android Debug 签名证书（SHA-256：`e82931a4c130f749fe03fa6f6b530007d03a7b00f003aea47cdc3d0f69e28dfd`），不是应用商店生产签名；覆盖安装需要现有应用使用同一证书。完整边界见[构建报告](BUILD-REPORT.md)和两份审计报告。
 
 ---
 
 # Simple Browser (Android)
 
-**Public release: v0.4** · **Application version: 2.6.0 (versionCode 15)**
+**Public release: v0.5** · **Application version: 2.8.1 (versionCode 18)**
+Simple Browser is an Android browser built on Mozilla GeckoView Stable `157.0.20260924084938`. Release tags and application version numbers are separate; the previous public release was [v0.4 (application version 2.6.0)](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.4).
 
 ## Downloads
 
-- [arm64-v8a APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-arm64-v8a.apk)
-- [x86_64 APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-x86_64.apk)
-- [Source and tests ZIP](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-source.zip) · [Build report](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-BUILD-REPORT.md) · [Privilege guard audit](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.4/SimpleBrowser-2.6.0-PRIVILEGE-GUARD-AUDIT.md) · source tree: [`source/simple-browser-crawler/`](source/simple-browser-crawler/)
+- [arm64-v8a APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-arm64-v8a.apk)
+- [x86_64 APK](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-x86_64.apk)
+- [Source, tests, and audits ZIP](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-source.zip) · [SHA-256 checksums](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/checksums.txt)
+- [Build report](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-BUILD-REPORT.md) · [App privilege-guard audit](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-PRIVILEGE-GUARD-AUDIT.md) · [Web-debug API audit](https://github.com/fghijkln/simple-browser-geckoview/releases/download/v0.5/SimpleBrowser-2.8.1-WEB-DEBUG-API-AUDIT.md)
 
-These are ABI-specific APKs; there is no universal APK. Minimum Android API is 29 and target API is 35. SHA-256 values for the v0.4 assets are listed in [`checksums.txt`](checksums.txt). The previous public release was [v0.3 (application version 2.5.0 / versionCode 14)](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.3); its tag and release assets remain unchanged.
+The APKs are ABI-specific; there is no universal APK. Minimum Android API is 29 and target API is 35.
 
-## Features and stack
+## What changed in v0.5
 
-- Native Android browser UI with tabs, new tabs, back/forward, reload, home, history, bookmarks, and HTTPS downloads.
-- The address bar accepts URLs or search terms. The app retains its **502-entry search catalogue**, 21 bundled search-engine icons, and custom HTTPS search templates; the crawler is not merged into that catalogue.
-- A separate **controlled page-crawling second source** is available from the menu. It extracts static text from a user-entered public HTTPS page and same-origin links, with hard limits of 4 pages, 90 seconds per task, 1 MiB per page, and serial requests at least 2 seconds apart. It is not a general-purpose search engine and does not promise to bypass anti-crawling or access restrictions. See [`source/simple-browser-crawler/docs/CRAWLER-IMPLEMENTATION-REPORT.md`](source/simple-browser-crawler/docs/CRAWLER-IMPLEMENTATION-REPORT.md).
-- The new-tab page has 14 offline wallpapers, with local photo selection and daily rotation. Desktop-request mode changes only the GeckoView User-Agent; it does not emulate a desktop viewport.
-- A local profile manager can create, switch, rename, inspect a configuration summary for, and remove environments; switching closes the current tabs. History, bookmarks, and request mode are profile-specific. Extension ZIPs can be imported for inspection and removed, but the Firefox extension runtime is not implemented and extension code is not executed.
-- Privacy settings use GeckoView's native Strict Tracking Protection, HTTPS-only mode, and Quad9 TRR-only at `https://dns.quad9.net/dns-query`. An optional DNS-only VPN prototype requires user-triggered Android system authorization; it is not a general-purpose traffic VPN.
-- Camera, microphone, and location permissions are optional and manually granted in Android Settings. The app never opens a dangerous runtime-permission request; without a grant, only the relevant sensitive website request is denied and normal browsing remains available. Camera, autofocus, and microphone hardware features are explicitly optional, so devices without those peripherals remain installable for basic browsing. A separate site-consent prompt appears after an OS grant. Photo/file selection uses Android's system document picker, not broad media-library access. This release adds a fail-closed guard for this app only; it is not whole-device root detection and cannot defend against an OS/kernel already under attacker control or runtime injection. See the [bilingual v0.4 release notes](https://github.com/fghijkln/simple-browser-geckoview/releases/tag/v0.4) and [`privilege-guard audit`](source/simple-browser-crawler/docs/PRIVILEGE-GUARD-AUDIT.md).
+The new-tab page uses exactly seven bundled offline wallpapers and **forces one image per device-local calendar date**. The image stays fixed within a date, advances on the next local date, and repeats on a seven-day cycle. The app recalculates at creation and foreground resume, and checks every 60 seconds while foregrounded. Settings provides a non-interactive explanation only—there is no manual selection, pause, or instant-switch entry point. No Android permission, alarm, or background service was added.
 
-## Manual app permissions and device capabilities
+Developer settings also offer two optional, default-off debugging features: GeckoView USB/ADB Firefox DevTools remote debugging and an in-app Console/Errors panel. A connected remote-debugging peer can inspect and manipulate pages; use only a trusted device and turn it off afterward. The in-app panel requires explicit consent followed by an Open action; only then does the app install its bundled extension and request host permission for all HTTP/HTTPS sites. It retains only fixed category, level, argument count, and a local ordinal. It does not read or display log/error text, stacks, URLs, DOM, form input, cookies, or network contents. Data stays in memory, capped at 500 entries, and Clear or close removes it. Pages can forge this limited metadata, so it is not trusted audit evidence. Closing uninstalls the extension and restarts the Runtime; tab URLs are restored where possible, but history and transient page state reset. See the [web-debugging guide](source/simple-browser-crawler/docs/WEB-DEBUGGING.en.md) and [bilingual release notes](RELEASE-NOTES-v0.5.md).
 
-To use website camera, microphone, or geolocation features, manually enable the corresponding app permission under **Android Settings > Apps > Simple Browser > Permissions**. Missing permissions are checked and denied without an OS runtime prompt. Camera, autofocus, and microphone hardware features are explicitly optional, so the app remains installable on devices without those peripherals. Website consent remains a separate GeckoView decision. Android's document picker grants access only to the user-selected file URI, so no broad media permission is needed. Android has no ordinary app-permissions toggle for clipboard access. This app does not implement step/activity recognition or health/body sensors; it does not declare `ACTIVITY_RECOGNITION` or `BODY_SENSORS`. Ordinary accelerometer and gyroscope use should not be mislabeled as requiring those permissions. GeckoView web motion-sensor behavior has not been device-tested and is not promised. The optional DNS-only VPN is a separate, user-triggered system authorization flow.
+## Retained features and verification limits
 
-## Crawler scope and limitations
+The browser remains based on GeckoView and retains the project's existing controlled crawler, search catalogue, network-privacy configuration, and app-local privilege guard. This release adds no Android Manifest permissions. See the [Android source and documentation](source/simple-browser-crawler/).
 
-The crawler accepts only a user-submitted public HTTPS page and follows same-origin HTTPS pages on the default port. It manually checks each redirect and follows at most 3 same-origin redirects per request chain. Each task attempts at most 4 pages, discovers at most 12 link candidates, runs for at most 90 seconds, and reads no more than 1 MiB of page body per page. Requests are sequential, normally at least 2 seconds apart, with connect and read timeouts of up to 8 seconds each. A declared `Crawl-delay` up to 30 seconds is honored; a longer delay stops the crawl.
-
-The crawler first requests the site's `robots.txt`. Successfully retrieved rules and a 404/410 “not provided” result are cached in memory only for 5 minutes, with at most 32 sites; the file limit is 512 KiB. Common User-Agent groups, `Allow`, `Disallow`, `*`, and `$` are supported; sitemaps and every percent-encoding edge case are not. Robots rules are not authorization. The crawler stops if robots is unavailable; a 404/410 does not grant permission. Public readability does not automatically grant rights to copy or republish content.
-
-Only static HTML, XHTML, and plain text are supported. The crawler extracts a title, a summary of up to 240 characters, and the source URL; it does not run JavaScript, fetch images, PDFs, page dependencies, or other binary resources, or automatically open or publish results. SPAs, content loaded after clicks or scrolling, authenticated pages, and paywalled content are generally unsuitable. 401/403, 429, 503 or other server errors, cross-origin redirects, oversized pages, and unsupported content stop the crawl; 429 is not retried automatically. Challenge pages, CAPTCHAs, login walls, and paywalls are detected by conservative text heuristics that can produce false positives or negatives.
-
-The crawler uses a separate Android Java `HttpURLConnection` path and system name resolution; it does not read GeckoView cookies or authentication data, and page bodies are not written to persistent cache. It does not use proxies, IP rotation, browser login state, fingerprint spoofing, or CAPTCHA bypass. Input and redirect targets are prechecked for HTTPS, the default port, and recognizable local/private/special-use addresses, but DNS preflight and connection resolution have timing/re-resolution boundaries. GeckoView's Quad9 `TRR_MODE_ONLY` does **not prove** that Java HTTP crawling uses the same Quad9 or DNS-only VPN path; equivalent DNS privacy is not claimed.
-
-## Profile isolation and privacy boundaries
-
-Each environment has a directory under the app-private `filesDir/fingerprint-profiles/<UUID>/`. GeckoView 157 exposes no public Java multi-profile API; this project passes Gecko's `-profile` argument through the public generic `arguments(...)` interface. This remains experimental: the argument's behavior on target Android devices and whether cookies, cache, and site storage actually land in separate directories have not been verified on a device. These environments should not be described as complete or strong isolation, and they are not recommended for separating high-risk accounts.
-
-There is no migration UI for the v0.1 default-browser data; it is not automatically migrated or split into the new environments.
-
-Locale and time zone are snapshots of Android system settings when an environment is created, not independent settings. Device hardware, OS build, GeckoView engine, graphics, screen, fonts, and other characteristics are not made to look like different devices. This is not an anti-fingerprinting device and does not provide anti-automation or anti-fraud bypass features.
-
-GeckoView is configured for Strict Tracking Protection, HTTPS-only, and Quad9 TRR-only, but configuration alone does not verify actual device traffic. DoH sends queries to Quad9 and is not anonymization. WebRTC is disabled using a Gecko preference Mozilla labels **Experimental**; no on-device ICE/IP leak test was performed. Whether GeckoView DNS traverses the VPN tunnel is also unverified. Android requires the user's system-level VPN authorization.
-
-Legacy extensions do not run; tracking protection uses GeckoView's native features, and per-site exceptions are limited or unavailable. Strict tracking protection may affect sign-ins, embedded content, or checkout pages. The crawler does not share browser cookies, but this does not mean its DNS path is isolated or anonymized.
-
-## Verification and known limitations
-
-This was **build-only + offline-test** validation: the local regression suite and static privilege-guard checks passed, covering the search catalogue, browser/profile/ETP/DoH/WebRTC models, and crawler loopback mocks; DoH tests used local mocks. Release lint reported **0 errors and 2 warnings**: the targetSdk 35 recommendation and a redundant SDK-version check under minSdk 29. No Android device or emulator was used; the APKs were not installed or launched. Real target sites, real anti-crawler detection, on-device DNS paths, and runtime isolation were not tested.
-
-Both APKs use an Android **debug key**, not a production store key; the certificate SHA-256 matches both v0.3 APKs. Verification reported `v3=true` and `v2=false`, and passed 4-byte and 16-KB alignment checks. An in-place upgrade may fail if an existing build was signed with a different key. Static scans found no Chromium/CEF markers. Build and offline-test results do not verify on-device network behavior.
-
-GeckoView is licensed under MPL-2.0, and build dependencies include Apache-2.0 components; their third-party license texts and notices are included with the APKs. The project has no custom top-level `LICENSE` file; these third-party notices are not a blanket license statement for the entire application code. Mozilla and GeckoView do not represent or endorse this project.
+Build/offline-test results, APK signature/ZIP/alignment checks, and static permission review are not real-device testing. No Android device or emulator was connected; real Console capture, DevTools device connectivity, and on-device wallpaper rendering are not claimed as verified. APKs use the retained Android Debug certificate (SHA-256: `e82931a4c130f749fe03fa6f6b530007d03a7b00f003aea47cdc3d0f69e28dfd`), not a production app-store key; an in-place upgrade requires the existing installation to use the same certificate. See the [build report](BUILD-REPORT.md) and audit reports for details.

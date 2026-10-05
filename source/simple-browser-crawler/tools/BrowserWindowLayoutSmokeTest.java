@@ -82,41 +82,21 @@ public final class BrowserWindowLayoutSmokeTest {
                         && !home.contains("siteShortcut("),
                 "new tab must reveal the full-window wallpaper without branding or shortcut tiles");
 
-        check(source.contains("Intent.ACTION_OPEN_DOCUMENT") && source.contains("image/*")
-                        && source.contains("Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION")
-                        && source.contains("takePersistableUriPermission(uri")
-                        && source.contains("WALLPAPER_URI_PREFERENCE")
-                        && source.contains("loadThumbnail(uri, new Size(1600, 2400), null)"),
-                "photo picker must persist safe URI grants and store wallpaper selection across restarts");
-        check(source.contains("saveWallpaperThumbnail(thumbnail)")
-                        && source.contains("restoreBundledWallpaper(false)")
-                        && source.contains("R.drawable.new_tab_wallpaper"),
-                "non-persistable documents and missing files must fall back cleanly to the bundled wallpaper");
-        int galleryStart = source.indexOf("private void showWallpaperPicker()");
-        int galleryEnd = source.indexOf("private View buildWallpaperCard(", galleryStart);
-        check(galleryStart >= 0 && galleryEnd > galleryStart, "expected an in-app bundled wallpaper gallery");
-        String gallery = source.substring(galleryStart, galleryEnd);
-        check(gallery.contains("wallpaperBackdrop.getDrawable()")
-                        && gallery.contains("new SwitchCompat(this)")
-                        && gallery.contains("picker.wallpapers()")
-                        && gallery.contains("buildWallpaperCard(first)")
-                        && gallery.contains("loadVisibleWallpaperThumbnails(galleryScroll)"),
-                "wallpaper picker must show the selected preview, daily toggle and lazily loaded offline wallpaper cards");
-        check(source.contains("WALLPAPER_THUMBNAIL_SAMPLE_SIZE = 8")
-                        && source.contains("result.usedFallback")
-                        && strings.contains("wallpaper_asset_unavailable"),
-                "thumbnail memory use must be bounded and failed bundled selections must fall back visibly");
-        check(!gallery.contains("openWallpaperGallery")
-                        && !gallery.contains("google.com/search?tbm=isch")
-                        && !gallery.contains("bing.com/images/search")
-                        && !source.contains("com.google.android.apps.wallpapers")
-                        && !source.contains("com.microsoft.bing.wallpapers"),
-                "wallpaper app and external Google/Microsoft gallery links must be absent");
-        check(strings.contains("每日自动轮换") && strings.contains("14 张原创壁纸随应用离线提供")
-                        && strings.contains("从设备选择照片") && strings.contains("每日自动轮换已关闭")
-                        && !strings.contains("Google Wallpapers")
-                        && !strings.contains("Microsoft Bing Wallpapers"),
-                "wallpaper picker must explain offline assets, local photos, manual selection and rotation");
+        check(!source.contains("showWallpaperPicker")
+                        && !source.contains("openWallpaperDocumentPicker")
+                        && !source.contains("REQUEST_SELECT_WALLPAPER")
+                        && !source.contains("WallpaperPickerFlow"),
+                "wallpaper selection code must not be exposed from the main UI");
+        check(strings.contains("壁纸每日强制轮换")
+                        && strings.contains("没有手动切换入口")
+                        && !strings.contains("从设备选择照片")
+                        && !strings.contains("每日自动轮换已关闭"),
+                "the wallpaper disclosure must be informational and must not describe a selection control");
+        check(source.contains("wallpaperDisclosure.setClickable(false)")
+                        && source.contains("wallpaperDisclosure.setFocusable(false)")
+                        && source.contains("LocalDate.now().toString()")
+                        && source.contains("WALLPAPER_REFRESH_INTERVAL_MILLIS"),
+                "daily wallpaper note must be non-interactive and the refresh must use the device-local date");
         check(menu.contains("List<BrowserUiModel.Action> quickActions = BrowserUiModel.quickActions()")
                         && menu.contains("quick.setOnClickListener(view -> dispatchOverflowAction(action.id))")
                         && !menu.contains("壁纸")
@@ -134,7 +114,7 @@ public final class BrowserWindowLayoutSmokeTest {
         Path wallpaper = Path.of(args[1]);
         check(Files.isRegularFile(wallpaper) && Files.size(wallpaper) > 16_384,
                 "the original wallpaper resource must remain present and nonempty");
-        System.out.println("PASS: edge-to-edge wallpaper/status bar with inset-safe controls, compact menu, 48dp tab counter, chevron-free engine picker, persistent photo picker/fallback, selected-state offline gallery, daily rotation toggle, no external wallpaper links, and sparse home regressions");
+        System.out.println("PASS: edge-to-edge wallpaper/status bar with inset-safe controls, compact menu, 48dp tab counter, chevron-free engine picker, non-interactive forced-rotation disclosure, no wallpaper selection UI, and sparse home regressions");
     }
 
     private static void check(boolean condition, String message) {

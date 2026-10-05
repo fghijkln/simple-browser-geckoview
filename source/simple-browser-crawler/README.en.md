@@ -1,30 +1,18 @@
-# Simple Browser for Android 2.6.0
+# Simple Browser Android source project (v0.5 / 2.8.1)
 
-Simple Browser is a Simplified-Chinese Android browser built on Mozilla GeckoView Stable `157.0.20260924084938`. It does not use Android System WebView and does not include a Chromium/CEF runtime. Mozilla Gecko libraries such as `libxul.so` and `libmozglue.so` are expected parts of GeckoView. See the project documentation for dependency, Android API, security, and licensing details.
+This directory contains the complete Android Gradle project for public release **v0.5** (application version **2.8.1 / versionCode 18**). The repository's [bilingual overview](../../README.md) has downloads, feature summaries, and verification limits; [bilingual release notes](../../RELEASE-NOTES-v0.5.md) describe the wallpaper and web-debugging changes.
 
-## App-local privilege guard
+The new-tab page contains seven bundled offline wallpapers and forces one image per device-local calendar date; there is no manual switch. USB/ADB Firefox DevTools and the in-app Console/Errors panel in Developer settings are both off by default. The Console extension is installed only after the user explicitly opens the panel, which requires accepting host permission for every HTTP/HTTPS site. The panel keeps restricted metadata in memory only, never log text or page URLs. Closing clears memory, uninstalls the extension, and restarts the Runtime. See the [English web-debugging guide](docs/WEB-DEBUGGING.en.md), [中文说明](docs/WEB-DEBUGGING.md), and [web-debug API audit](evidence/GECKOVIEW-WEB-DEBUG-API-AUDIT.md) for details and limitations.
 
-This version performs fail-closed checks on **this app and its current process** during application startup, before an Activity resumes, and when the optional DNS-only VPN service starts. The merged requested-permission set must match the reviewed allowlist. The guard checks the app's dangerous-permission grants, selected special App Ops, and app-specific device-administrator, accessibility-service, and notification-listener state. It rejects a process whose UID is root or shell and requires the effective Linux capability fields `CapEff`, `CapPrm`, `CapInh`, and `CapAmb` to be readable and zero. If a required system value cannot be read or parsed, startup is denied. See [`docs/PRIVILEGE-GUARD-AUDIT.md`](docs/PRIVILEGE-GUARD-AUDIT.md).
+The Android Manifest and app-local privilege guard retain their reviewed v0.4 implementation; daily rotation and web debugging add no Android permissions. Release APKs use the project's retained Android Debug signing certificate, not a production app-store key. Offline builds and static checks are not device tests; real debugging connectivity and wallpaper rendering were not device-verified. See the repository-root [build report](../../BUILD-REPORT.md) for the full test record.
 
-The guard only checks this app; **it does not detect whether the whole device is rooted**. It cannot defend against a kernel or operating system already controlled by an attacker, modified or deceptive system APIs, or runtime code injection. It is not a continuous background monitor: a change made while the app remains open is ordinarily detected at the next startup, Activity-resume, or VPN-service check.
+## Build locally
 
-GeckoView 157's isolated content process and all-site Fission are configured as defense-in-depth. These are configuration-level claims only; this candidate was not run on a physical device or emulator. No connected Android device or emulator was available for this build.
-
-## Permissions and VPN behavior retained
-
-The optional camera, microphone, and coarse/fine location permissions remain available for users to grant manually in Android settings; the app does not request them through a runtime permission dialog. Website requests still follow the browser's separate site-level decision. The optional DNS-only VPN is retained and starts only after an explicit user action and Android's VPN consent flow. It does not tunnel general traffic.
-
-The app does not request broad media or storage access; user-selected files use Android's system document picker. Unsupported GeckoView permission requests are denied. Some checks concern special system access rather than ordinary runtime permissions; the app does not add or request device-owner, accessibility, or notification-listener services as part of this release.
-
-## Build and verification
-
-The project uses Gradle Wrapper 9.7.1, Android Gradle Plugin 9.4.0, Android SDK API 37 (minor 2), `minSdk 29`, and `targetSdk 35`. It produces ABI-specific `arm64-v8a` and `x86_64` APKs, not a universal APK.
+Requires JDK 21, Gradle Wrapper 9.7.1, Android Gradle Plugin 9.4.0, and Android SDK API 37 (minor 2). The app uses `minSdk 29` and `targetSdk 35` and builds only ABI-specific `arm64-v8a` and `x86_64` APKs.
 
 ```bash
 bash tools/run-geckoview-local-tests.sh
-bash tools/run-dns-doh-local-test.sh
-bash tools/run-crawler-local-mock.sh
 ./gradlew --no-daemon :app:lintRelease :app:assembleRelease
 ```
 
-The existing release signing configuration uses the project's Android debug key, not a production app-store signing key. Candidate APKs must match the v0.3 certificate identity. Build, lint, offline tests, ZIP/signature/alignment checks, and SHA-256 results are recorded in the accompanying build report. Static verification and successful compilation do not establish installation, startup, UI, permission-dialog, Gecko process-isolation, Fission, or real-device network behavior.
+Offline regression coverage includes the search catalogue, controlled crawler, profiles, wallpaper rotation, permission policy, and web debugging. See the [privilege-guard audit](docs/PRIVILEGE-GUARD-AUDIT.md) for the app-local checks' scope.

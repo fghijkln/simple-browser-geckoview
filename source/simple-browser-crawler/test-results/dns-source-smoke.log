@@ -1,0 +1,19 @@
+PASS: VpnService limits VPN to this package
+PASS: VPN builder has no IPv4/IPv6 default route
+PASS: only four exact Quad9 DNS addresses are in the route policy
+PASS: routes use exact host prefixes
+PASS: TUN reader ignores non-DNS destination ports
+PASS: TCP DNS half-close remains alive until the DoH response is sent
+PASS: TCP responses respect peer MSS and bound segment allocation
+PASS: TCP MSS options are parsed and length-checked
+PASS: DoH socket is protected before connecting
+PASS: DoH TLS hostname verification is enabled
+PASS: DoH bootstrap is numeric and does not use hostname resolution
+PASS: only RFC 8484 binary POST is used
+PASS: no URL query-string DNS transport is used
+PASS: DNS failure path explicitly avoids cleartext fallback
+PASS: VPN consent state and inactive state are surfaced
+PASS: experimental and unverified resolver-path caveat is visible
+PASS: Quad9 disclosure is visible
+PASS: existing WebRTC protection policy remains
+PASS: VpnService is declared with the required bind permission

@@ -1,0 +1,1 @@
+No diff after normalizing only versionCode/versionName.

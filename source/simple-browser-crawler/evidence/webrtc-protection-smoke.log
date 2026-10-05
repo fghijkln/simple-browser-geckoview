@@ -1,0 +1,5 @@
+PASS: default-on persisted WebRTC policy
+PASS: experimental native peer-connection preference and fail-closed navigation gate
+PASS: strict ETP, HTTPS-only, Quad9 TRR-only, and manual system/site permission gates
+PASS: no cleartext traffic, no automatic Android permission request, pinned engine and transparent limitations
+PASS: source-only checks; no runtime, public detector, or external DNS query was used

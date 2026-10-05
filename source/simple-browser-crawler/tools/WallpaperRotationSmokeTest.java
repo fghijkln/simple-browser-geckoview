@@ -1,19 +1,25 @@
 package com.cue.simplebrowser;
 
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.HashSet;
 import java.util.Set;
+import javax.imageio.ImageIO;
 
-/** Focused checks for the offline wallpaper library and daily-selection state machine. */
+/** Static/source-level regression checks for the forced seven-wallpaper daily cycle. */
 public final class WallpaperRotationSmokeTest {
     private WallpaperRotationSmokeTest() { }
 
     public static void main(String[] args) throws IOException {
-        check(args.length == 4, "expected MainActivity, strings, bundled wallpaper assets, and retained courtyard image");
+        check(args.length == 4, "expected MainActivity, strings, bundled asset directory, and retained original drawable");
         Path mainActivity = Path.of(args[0]);
         Path stringsPath = Path.of(args[1]);
         Path assets = Path.of(args[2]);
@@ -21,114 +27,96 @@ public final class WallpaperRotationSmokeTest {
         String source = Files.readString(mainActivity, StandardCharsets.UTF_8);
         String strings = Files.readString(stringsPath, StandardCharsets.UTF_8);
 
-        check(WallpaperRotation.all().size() == 14, "exactly fourteen wallpapers must be catalogued");
-        check(Files.isRegularFile(courtyard) && Files.size(courtyard) > 16_384,
-                "the retained original courtyard wallpaper must remain bundled");
+        check(WallpaperRotation.all().size() == WallpaperRotation.CYCLE_DAYS && WallpaperRotation.CYCLE_DAYS == 7,
+                "the bundled catalog must contain exactly seven wallpapers");
         Set<String> ids = new HashSet<>();
         int assetCount = 0;
+        Set<String> imageDigests = new HashSet<>();
         for (WallpaperRotation.Wallpaper wallpaper : WallpaperRotation.all()) {
-            check(ids.add(wallpaper.id), "wallpaper ids must be unique");
-            if (wallpaper.assetPath != null) {
-                Path file = assets.resolve(wallpaper.assetPath);
-                check(Files.isRegularFile(file) && Files.size(file) > 16_384,
-                        "bundled wallpaper asset missing or implausibly small: " + wallpaper.assetPath);
-                assetCount++;
+            check(ids.add(wallpaper.id), "wallpaper IDs must be unique");
+            Path file = wallpaper.assetPath == null ? courtyard : assets.resolve(wallpaper.assetPath);
+            check(Files.isRegularFile(file) && Files.size(file) > 16_384,
+                    "bundled wallpaper is missing or implausibly small: " + file);
+            BufferedImage image = ImageIO.read(file.toFile());
+            check(image != null && image.getWidth() == 1440 && image.getHeight() == 2560,
+                    "wallpaper must decode at its expected portrait dimensions: " + file);
+            image.flush();
+            try {
+                byte[] digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file));
+                check(imageDigests.add(java.util.HexFormat.of().formatHex(digest)),
+                        "bundled wallpaper images must not be exact duplicates: " + file);
+            } catch (NoSuchAlgorithmException impossible) {
+                throw new AssertionError(impossible);
             }
+            if (wallpaper.assetPath != null) assetCount++;
         }
-        check(assetCount == 13, "thirteen generated wallpapers plus the retained courtyard image are required");
+        check(assetCount == 6, "the library must use one retained drawable plus six bundled JPEG assets");
+        try (var files = Files.list(assets.resolve("wallpapers"))) {
+            long images = files.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().matches(".*\\.(?i:jpg|jpeg|png|webp)$"))
+                    .count();
+            check(images == 6, "only the six catalogued JPEG wallpaper files may remain in assets/wallpapers");
+        }
 
         LocalDate start = LocalDate.of(2026, 10, 3);
-        WallpaperRotation.SelectionState state = new WallpaperRotation.SelectionState(
-                WallpaperRotation.DEFAULT_ID, false, null, null)
-                .setAutomatic(true, start.toString());
-        check(state.automatic && state.automaticDate.equals(start.toString()),
-                "enabling automatic rotation must persist enabled state and local date");
-        String stableId = state.selectedId;
-        WallpaperRotation.SelectionState sameDay = state.onLocalDate(start.toString());
-        check(sameDay == state && sameDay.selectedId.equals(stableId),
-                "same local date must not change the selected wallpaper across checks or restarts");
-        check(WallpaperRotation.selectForDate(start.toString(), WallpaperRotation.DEFAULT_ID)
-                        .equals(WallpaperRotation.selectForDate(start.toString(), WallpaperRotation.DEFAULT_ID)),
-                "date selection must be deterministic for the same local date and prior image");
-        WallpaperRotation.SelectionState malformed = new WallpaperRotation.SelectionState(
-                "missing-wallpaper", true, "not-an-ISO-date", "also-missing")
-                .onLocalDate(start.toString());
-        check(malformed.selectedId != null && malformed.automatic
-                        && start.toString().equals(malformed.automaticDate)
-                        && malformed.lastAutomaticId.equals(malformed.selectedId),
-                "malformed persisted IDs/date must be normalized and safely restarted on the current local date");
-
-        for (int day = 1; day < 45; day++) {
-            LocalDate nextDate = start.plusDays(day);
-            WallpaperRotation.SelectionState next = state.onLocalDate(nextDate.toString());
-            check(next.selectedId != null && !next.selectedId.equals(state.selectedId),
-                    "daily rotation must not repeat the immediately previous image on " + nextDate);
-            check(next.automaticDate.equals(nextDate.toString()), "local date must advance with rotation");
-            state = next;
+        int startIndex = WallpaperRotation.indexForLocalDate(start.toString());
+        Set<String> sevenDayCycle = new HashSet<>();
+        for (int offset = 0; offset < 7; offset++) {
+            LocalDate date = start.plusDays(offset);
+            int index = WallpaperRotation.indexForLocalDate(date.toString());
+            check(index == (startIndex + offset) % 7,
+                    "adjacent local dates must advance exactly one slot on " + date);
+            check(sevenDayCycle.add(WallpaperRotation.forLocalDate(date.toString()).id),
+                    "a seven-day cycle must visit every wallpaper once");
+            check(index == WallpaperRotation.indexForLocalDate(date.toString()),
+                    "the same local date must always map to the same wallpaper");
         }
+        check(WallpaperRotation.indexForLocalDate(start.plusDays(7).toString()) == startIndex,
+                "the fixed local-date mapping must repeat exactly after seven days");
+        check(WallpaperRotation.indexForLocalDate(start.minusDays(1).toString())
+                        != WallpaperRotation.indexForLocalDate(start.toString()),
+                "moving the local date backwards across midnight must recompute the selected wallpaper");
 
-        WallpaperRotation.SelectionState manual = state.selectManually("coastal-cliffs");
-        check(!manual.automatic && manual.automaticDate == null
-                        && "coastal-cliffs".equals(manual.selectedId),
-                "manual wallpaper selection must persist the image and turn off daily rotation");
-        WallpaperRotation.SelectionState reenabled = manual.setAutomatic(true, start.plusDays(46).toString());
-        check(reenabled.automatic && !"coastal-cliffs".equals(reenabled.selectedId),
-                "re-enabling daily rotation should move away from the manually selected previous image");
+        Instant sameInstant = Instant.parse("2026-01-01T00:30:00Z");
+        LocalDate shanghaiDate = LocalDate.ofInstant(sameInstant, ZoneId.of("Asia/Shanghai"));
+        LocalDate losAngelesDate = LocalDate.ofInstant(sameInstant, ZoneId.of("America/Los_Angeles"));
+        check(!shanghaiDate.equals(losAngelesDate), "timezone test instant must straddle local midnight");
+        check(!WallpaperRotation.forLocalDate(shanghaiDate.toString()).id
+                        .equals(WallpaperRotation.forLocalDate(losAngelesDate.toString()).id),
+                "a timezone change that changes the local calendar date must select that date's wallpaper");
 
-        check(source.contains("new-tab-wallpaper-daily-auto")
-                        && source.contains("new-tab-wallpaper-auto-date")
-                        && source.contains("new-tab-wallpaper-last-auto-id")
-                        && source.contains("catch (ClassCastException malformedPreference)")
-                        && source.contains("preferences.edit().remove(key).apply()")
-                        && source.contains("persistWallpaperRotationState")
-                        && source.contains("editor.commit()"),
-                "automatic toggle, date and repeat-prevention state must be persisted locally");
-        check(source.contains(".setAutomatic(checked, LocalDate.now().toString())")
-                        && source.contains("WallpaperPickerFlow.open(readWallpaperRotationState())")
-                        && source.contains(".select(wallpaperId, id -> loadBundledWallpaper(id, 1))")
-                        && source.contains("replaceWallpaperSelection")
-                        && source.contains(".putBoolean(WALLPAPER_AUTO_PREFERENCE, false)"),
-                "both bundled and local-photo manual selection must disable automatic rotation");
-        check(source.contains("refreshDailyWallpaper();")
-                        && source.contains("wallpaperRotationHandler.postDelayed(this, 60_000L)")
-                        && source.contains("wallpaperRotationHandler.removeCallbacks(wallpaperRotationCheck)"),
-                "foreground date changes and app resume must refresh without a background service");
-
-        int pickerStart = source.indexOf("private void showWallpaperPicker()");
-        int pickerEnd = source.indexOf("private View buildWallpaperCard(", pickerStart);
-        check(pickerStart >= 0 && pickerEnd > pickerStart, "expected the offline wallpaper chooser");
-        String picker = source.substring(pickerStart, pickerEnd);
-        check(picker.contains("wallpaperBackdrop.getDrawable()")
-                        && picker.contains("new SwitchCompat(this)")
-                        && picker.contains("picker.wallpapers()")
-                        && picker.contains("buildWallpaperCard(first)")
-                        && picker.contains("loadVisibleWallpaperThumbnails(galleryScroll)"),
-                "chooser must show selected-state preview, persistent toggle and bundled gallery");
-        int cardStart = source.indexOf("private View buildWallpaperCard(");
-        int loaderStart = source.indexOf("private void loadVisibleWallpaperThumbnails(", cardStart);
-        check(cardStart >= 0 && loaderStart > cardStart,
-                "expected a separate lazy wallpaper thumbnail loader");
-        String cardBuilder = source.substring(cardStart, loaderStart);
-        check(cardBuilder.contains("thumbnail.setImageResource(R.drawable.ic_browser)")
-                        && !cardBuilder.contains("loadBundledWallpaper("),
-                "opening the chooser must not synchronously decode every bundled wallpaper thumbnail");
-        check(!picker.contains("openWallpaperGallery")
-                        && !picker.contains("google.com/search?tbm=isch")
-                        && !picker.contains("bing.com/images/search")
-                        && !picker.contains("Intent.ACTION_VIEW"),
-                "wallpaper chooser must not contain Google/Microsoft image-search or app-link routes");
-        check(!source.contains("com.google.android.apps.wallpapers")
-                        && !source.contains("com.microsoft.bing.wallpapers")
-                        && !strings.contains("Google Wallpapers")
-                        && !strings.contains("Microsoft Bing Wallpapers")
-                        && !strings.contains("wallpaper_google_gallery")
-                        && !strings.contains("wallpaper_bing_gallery"),
-                "Google and Microsoft wallpaper-app link code and copy must be absent");
-        check(strings.contains("每日自动轮换") && strings.contains("离线提供")
-                        && strings.contains("每日自动轮换已关闭"),
-                "wallpaper copy must explain offline availability and manual-selection behavior");
-
-        System.out.println("PASS: 14 bundled wallpapers, date stability, deterministic daily rotation, no immediate repeat, manual-selection/toggle state, local persistence, offline gallery preview, and no Google/Microsoft wallpaper app-link code");
+        int createStart = source.indexOf("protected void onCreate(");
+        int resumeStart = source.indexOf("protected void onResume()");
+        check(createStart >= 0 && resumeStart > createStart
+                        && source.substring(createStart, resumeStart).contains("restoreSelectedWallpaper();"),
+                "the current-date wallpaper must be applied during Activity creation");
+        int pauseStart = source.indexOf("protected void onPause()", resumeStart);
+        int backStart = source.indexOf("public void onBackPressed()", pauseStart);
+        check(resumeStart >= 0 && pauseStart > resumeStart && backStart > pauseStart,
+                "expected explicit Activity resume/pause lifecycle methods");
+        String resume = source.substring(resumeStart, pauseStart);
+        String pause = source.substring(pauseStart, backStart);
+        check(resume.contains("refreshDailyWallpaper();")
+                        && resume.contains("wallpaperRotationChecksActive = true;")
+                        && resume.contains("wallpaperRotationHandler.postDelayed(wallpaperRotationCheck, WALLPAPER_REFRESH_INTERVAL_MILLIS)")
+                        && source.contains("wallpaperRotationHandler.postDelayed(this, WALLPAPER_REFRESH_INTERVAL_MILLIS)")
+                        && source.contains("LocalDate.now().toString()"),
+                "app resume and foreground 60-second checks must recalculate from the current system-local date");
+        check(pause.contains("wallpaperRotationChecksActive = false;")
+                        && pause.contains("wallpaperRotationHandler.removeCallbacks(wallpaperRotationCheck)"),
+                "the periodic refresh must stop when the Activity is paused");
+        check(!source.contains("AlarmManager") && !source.contains("SCHEDULE_EXACT_ALARM"),
+                "rotation must not rely on exact alarms or request an alarm permission");
+        check(!source.contains("showWallpaperPicker")
+                        && !source.contains("openWallpaperDocumentPicker")
+                        && !source.contains("REQUEST_SELECT_WALLPAPER")
+                        && !source.contains("WallpaperPickerFlow")
+                        && !source.contains("selectManually"),
+                "the main UI and app code must expose no wallpaper selection control or picker path");
+        check(strings.contains("壁纸每日强制轮换")
+                        && strings.contains("没有手动切换入口"),
+                "settings disclosure must clearly describe forced daily rotation without an interactive control");
+        System.out.println("PASS: seven decodable 1440x2560 wallpapers; adjacent-date advancement; fixed same-day mapping; exact seven-day cycle; timezone/date recalculation; foreground midnight refresh; no wallpaper picker or switch UI");
     }
 
     private static void check(boolean condition, String message) {

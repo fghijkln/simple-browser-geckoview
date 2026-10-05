@@ -1,0 +1,18 @@
+PASS: binary RFC 8484 POST, headers, ID remap, multiple records and EDNS
+PASS: chunked HTTP response
+PASS: mismatched response question fail-closed
+PASS: malformed/truncated response fail-closed
+PASS: HTTP error fail-closed
+PASS: deceptive DoH content-type prefix fail-closed
+PASS: DoH timeout fail-closed
+PASS: bad certificate and hostname-verification path fail-closed
+PASS: trusted certificate with the wrong hostname fail-closed
+PASS: malformed request rejected before socket creation
+PASS: IPv4 DNS packet and checksummed UDP reply
+PASS: IPv6 DNS packet, EDNS and checksummed UDP reply
+PASS: oversized DoH response is truncated safely with TC for TCP retry
+PASS: IPv4/IPv6 DNS-over-TCP framing, local DoH exchange and checksummed replies
+PASS: ordinary webpage TCP destination remains outside exact DNS host routes
+PASS: plaintext DNS fallback attempts = 0
+PASS: external/Quad9 queries = 0 (all mock traffic used loopback)
+PASS: total mock HTTPS requests = 9

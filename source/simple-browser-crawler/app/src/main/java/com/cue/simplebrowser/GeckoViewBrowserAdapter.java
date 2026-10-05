@@ -22,11 +22,17 @@ import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.WebRequestError;
 import org.mozilla.geckoview.WebResponse;
+import org.mozilla.geckoview.WebExtension;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
@@ -47,6 +53,11 @@ final class GeckoViewBrowserAdapter {
     private static volatile boolean javascriptFallback;
     private static boolean webRtcPolicyInitializationRequested;
     private static long webRtcPolicyGeneration;
+    private static volatile WebExtension consoleExtension;
+    private static volatile boolean consoleExtensionReady = true;
+    private static volatile boolean consoleExtensionFailed;
+    private static volatile boolean consoleExtensionRequested;
+    private static volatile ConsoleSetupListener consoleSetupListener;
 
     interface Callback {
         void onUrlChanged(String url);
@@ -82,6 +93,14 @@ final class GeckoViewBrowserAdapter {
         void onTerminated(int status, int errorCode);
     }
 
+    interface ConsoleEntryHandler {
+        void onEntry(GeckoSession sourceSession, WebConsoleEntry entry);
+    }
+
+    interface ConsoleSetupListener {
+        void onSetupResult(boolean requested, boolean success);
+    }
+
     static final class WebRtcPolicyResult {
         final boolean protectedModeEnabled;
         final boolean nativePreferenceApplied;
@@ -113,11 +132,15 @@ final class GeckoViewBrowserAdapter {
     private volatile DownloadHandler downloadHandler;
     private volatile PermissionPromptHandler permissionPromptHandler;
     private volatile RenderProcessTerminatedListener renderProcessTerminatedListener;
+    private volatile ConsoleEntryHandler consoleEntryHandler;
+    private volatile boolean consoleCaptureActive;
+    private volatile WebExtension.Port consolePort;
 
     static void initializeRuntime(Context context, String profileDirectory,
                                   boolean webRtcProtectionEnabled,
+                                  boolean consolePanelRequested,
                                   Consumer<WebRtcPolicyResult> callback) {
-        ensureRuntime(context, profileDirectory);
+        ensureRuntime(context, profileDirectory, consolePanelRequested);
         synchronized (GeckoViewBrowserAdapter.class) {
             webRtcPolicyInitializationRequested = true;
         }
@@ -126,7 +149,7 @@ final class GeckoViewBrowserAdapter {
 
     static GeckoViewBrowserAdapter createWithSurface(Context context) {
         Context applicationContext = context.getApplicationContext();
-        GeckoRuntime engineRuntime = ensureRuntime(applicationContext, activeProfilePath);
+        GeckoRuntime engineRuntime = ensureRuntime(applicationContext, activeProfilePath, false);
         ensureWebRtcPolicyInitialized(applicationContext);
 
         ContentBlocking.Settings contentBlocking = new ContentBlocking.Settings.Builder()
@@ -152,6 +175,8 @@ final class GeckoViewBrowserAdapter {
         view.setSession(session);
         session.setActive(false);
         session.setFocused(false);
+        WebExtension installedConsoleExtension = consoleExtension;
+        if (installedConsoleExtension != null) adapter.attachConsoleExtension(installedConsoleExtension);
         INSTANCES.add(new WeakReference<>(adapter));
         return adapter;
     }
@@ -166,7 +191,8 @@ final class GeckoViewBrowserAdapter {
         this.surfaceContainer = surfaceContainer;
     }
 
-    private static synchronized GeckoRuntime ensureRuntime(Context context, String profileDirectory) {
+    private static synchronized GeckoRuntime ensureRuntime(Context context, String profileDirectory,
+                                                           boolean consolePanelRequested) {
         if (profileDirectory == null || profileDirectory.trim().isEmpty()) {
             throw new IllegalStateException("An app-private Gecko profile directory is required");
         }
@@ -183,10 +209,16 @@ final class GeckoViewBrowserAdapter {
                 .strictSocialTrackingProtection(true)
                 .queryParameterStrippingEnabled(true)
                 .build();
+        android.content.SharedPreferences debugPreferences = applicationContext.getSharedPreferences(
+                "simple-browser.preferences", Context.MODE_PRIVATE);
+        boolean remoteDebuggingEnabled = WebDebugPolicy.remoteDebuggingEnabled(
+                debugPreferences.contains(WebDebugPolicy.REMOTE_DEBUGGING_PREFERENCE),
+                debugPreferences.getBoolean(WebDebugPolicy.REMOTE_DEBUGGING_PREFERENCE,
+                        WebDebugPolicy.REMOTE_DEBUGGING_DEFAULT));
         GeckoRuntimeSettings settings = new GeckoRuntimeSettings.Builder()
                 .javaScriptEnabled(true)
                 .globalPrivacyControlEnabled(true)
-                .remoteDebuggingEnabled(false)
+                .remoteDebuggingEnabled(remoteDebuggingEnabled)
                 .aboutConfigEnabled(false)
                 .consoleOutput(false)
                 .debugLogging(false)
@@ -204,7 +236,151 @@ final class GeckoViewBrowserAdapter {
                 GeckoRuntimeSettings.STRATEGY_ISOLATE_EVERYTHING);
         runtime = GeckoRuntime.create(applicationContext, settings);
         activeProfilePath = profileDirectory;
+        configureConsoleExtension(runtime, consolePanelRequested);
         return runtime;
+    }
+
+    private static void configureConsoleExtension(GeckoRuntime target, boolean enabled) {
+        consoleExtensionRequested = enabled;
+        consoleExtensionReady = false;
+        consoleExtensionFailed = false;
+        consoleExtension = null;
+        org.mozilla.geckoview.WebExtensionController controller = target.getWebExtensionController();
+        if (enabled) {
+            controller.ensureBuiltIn(WebDebugPolicy.CONSOLE_EXTENSION_URI,
+                    WebDebugPolicy.CONSOLE_EXTENSION_ID).accept(
+                    extension -> finishConsoleExtensionSetup(target, true, true, extension),
+                    error -> finishConsoleExtensionSetup(target, true, false, null));
+            return;
+        }
+        // Built-in extensions survive GeckoRuntime restarts. Remove a stale opt-in copy
+        // before any queued page URL is allowed to load in the default-off configuration.
+        controller.list().accept(extensions -> {
+            WebExtension stale = findConsoleExtension(extensions);
+            if (stale == null) {
+                finishConsoleExtensionSetup(target, false, true, null);
+            } else {
+                controller.uninstall(stale).accept(
+                        ignored -> finishConsoleExtensionSetup(target, false, true, null),
+                        error -> finishConsoleExtensionSetup(target, false, false, null));
+            }
+        }, error -> finishConsoleExtensionSetup(target, false, false, null));
+    }
+
+    private static WebExtension findConsoleExtension(List<WebExtension> extensions) {
+        if (extensions == null) return null;
+        for (WebExtension extension : extensions) {
+            if (extension != null && WebDebugPolicy.CONSOLE_EXTENSION_ID.equals(extension.id)) return extension;
+        }
+        return null;
+    }
+
+    private static void finishConsoleExtensionSetup(GeckoRuntime target, boolean requested,
+                                                    boolean success, WebExtension extension) {
+        synchronized (GeckoViewBrowserAdapter.class) {
+            if (runtime != target) return;
+            consoleExtensionRequested = requested;
+            consoleExtensionFailed = !success;
+            consoleExtension = success && requested ? extension : null;
+            // An install failure does not disable ordinary browsing; stale-extension
+            // cleanup failure does, so no page runs until the old privileged add-on is gone.
+            consoleExtensionReady = success || requested;
+        }
+        if (success && requested && extension != null) {
+            for (WeakReference<GeckoViewBrowserAdapter> reference : INSTANCES) {
+                GeckoViewBrowserAdapter adapter = reference.get();
+                if (adapter == null) INSTANCES.remove(reference);
+                else adapter.attachConsoleExtension(extension);
+            }
+        }
+        if (consoleExtensionReady) applyWebRtcPolicyToInstances();
+        ConsoleSetupListener listener = consoleSetupListener;
+        if (listener != null) {
+            MAIN.post(() -> listener.onSetupResult(requested, success));
+        }
+    }
+
+    static void setConsoleSetupListener(ConsoleSetupListener listener) {
+        consoleSetupListener = listener;
+    }
+
+    static boolean isConsoleExtensionReady() {
+        return consoleExtensionRequested && consoleExtensionReady
+                && !consoleExtensionFailed && consoleExtension != null;
+    }
+
+    private void attachConsoleExtension(WebExtension extension) {
+        if (extension == null) return;
+        session.getWebExtensionController().setMessageDelegate(extension,
+                new WebExtension.MessageDelegate() {
+                    @Override
+                    public void onConnect(WebExtension.Port port) {
+                        if (!isTrustedConsolePort(port)) {
+                            if (port != null) port.disconnect();
+                            return;
+                        }
+                        WebExtension.Port previous = consolePort;
+                        if (previous != null && previous != port) previous.disconnect();
+                        consolePort = port;
+                        port.setDelegate(new WebExtension.PortDelegate() {
+                            @Override
+                            public void onPortMessage(Object message, WebExtension.Port sourcePort) {
+                                if (sourcePort != consolePort || !consoleCaptureActive
+                                        || !isTrustedConsolePort(sourcePort)
+                                        || !(message instanceof JSONObject)) return;
+                                JSONObject payload = (JSONObject) message;
+                                if (!"entry".equals(payload.optString("type", ""))) return;
+                                Object rawCategory = payload.opt("category");
+                                Object rawLevel = payload.opt("level");
+                                if (!(rawCategory instanceof String) || !(rawLevel instanceof String)) return;
+                                String category = (String) rawCategory;
+                                String level = (String) rawLevel;
+                                Object rawCount = payload.opt("argumentCount");
+                                if (!(rawCount instanceof Number)) return;
+                                double countValue = ((Number) rawCount).doubleValue();
+                                if (!Double.isFinite(countValue) || countValue != Math.rint(countValue)
+                                        || countValue < 0
+                                        || countValue > WebDebugPolicy.CONSOLE_MAX_ARGUMENTS) return;
+                                WebConsoleEntry entry = WebConsoleEntry.fromPayload(
+                                        category, level, (int) countValue);
+                                ConsoleEntryHandler handler = consoleEntryHandler;
+                                if (entry != null && handler != null && consoleCaptureActive) {
+                                    handler.onEntry(session, entry);
+                                }
+                            }
+
+                            @Override
+                            public void onDisconnect(WebExtension.Port sourcePort) {
+                                if (consolePort == sourcePort) consolePort = null;
+                            }
+                        });
+                        sendConsoleCaptureState();
+                    }
+                }, WebDebugPolicy.CONSOLE_NATIVE_APP);
+    }
+
+    private boolean isTrustedConsolePort(WebExtension.Port port) {
+        if (port == null || !WebDebugPolicy.CONSOLE_NATIVE_APP.equals(port.name)
+                || port.sender == null || port.sender.webExtension == null) return false;
+        WebExtension.MessageSender sender = port.sender;
+        return WebDebugPolicy.CONSOLE_EXTENSION_ID.equals(sender.webExtension.id)
+                && sender.environmentType == WebExtension.MessageSender.ENV_TYPE_CONTENT_SCRIPT
+                && sender.session == session && sender.isTopLevel()
+                && WebDebugPolicy.sameHttpOrigin(sender.url, currentUrl);
+    }
+
+    private void sendConsoleCaptureState() {
+        WebExtension.Port port = consolePort;
+        if (port == null) return;
+        try {
+            JSONObject state = new JSONObject();
+            state.put("type", "capture-state");
+            state.put("active", consoleCaptureActive && pageVisible
+                    && isConsoleExtensionReady());
+            port.postMessage(state);
+        } catch (JSONException | RuntimeException ignored) {
+            // A closing or invalid port must not affect page navigation.
+        }
     }
 
     private static void ensureWebRtcPolicyInitialized(Context context) {
@@ -222,7 +398,7 @@ final class GeckoViewBrowserAdapter {
         synchronized (GeckoViewBrowserAdapter.class) {
             profilePath = activeProfilePath;
         }
-        GeckoRuntime ignored = ensureRuntime(context, profilePath);
+        GeckoRuntime ignored = ensureRuntime(context, profilePath, false);
         final long generation;
         synchronized (GeckoViewBrowserAdapter.class) {
             webRtcProtectionEnabled = enabled;
@@ -264,7 +440,7 @@ final class GeckoViewBrowserAdapter {
             protectionEnabled = webRtcProtectionEnabled;
             fallback = javascriptFallback;
         }
-        if (!ready) return;
+        if (!ready || !consoleExtensionReady) return;
         for (WeakReference<GeckoViewBrowserAdapter> reference : INSTANCES) {
             GeckoViewBrowserAdapter adapter = reference.get();
             if (adapter == null) {
@@ -614,6 +790,57 @@ final class GeckoViewBrowserAdapter {
         return session;
     }
 
+    void setConsoleEntryHandler(ConsoleEntryHandler handler) {
+        consoleEntryHandler = handler;
+    }
+
+    void setConsoleCaptureActive(boolean active) {
+        consoleCaptureActive = active && pageVisible && isConsoleExtensionReady();
+        sendConsoleCaptureState();
+    }
+
+    static void shutdownForConsolePanelClose(Consumer<Boolean> callback) {
+        final GeckoRuntime oldRuntime;
+        synchronized (GeckoViewBrowserAdapter.class) {
+            oldRuntime = runtime;
+        }
+        for (WeakReference<GeckoViewBrowserAdapter> reference : INSTANCES) {
+            GeckoViewBrowserAdapter adapter = reference.get();
+            if (adapter != null) adapter.flushAndCloseForProfileSwitch();
+        }
+        if (oldRuntime == null) {
+            finishConsoleOptOutShutdown(null, true, callback);
+            return;
+        }
+        org.mozilla.geckoview.WebExtensionController controller = oldRuntime.getWebExtensionController();
+        controller.list().accept(extensions -> {
+            WebExtension stale = findConsoleExtension(extensions);
+            if (stale == null) {
+                finishConsoleOptOutShutdown(oldRuntime, true, callback);
+            } else {
+                controller.uninstall(stale).accept(
+                        ignored -> finishConsoleOptOutShutdown(oldRuntime, true, callback),
+                        error -> finishConsoleOptOutShutdown(oldRuntime, false, callback));
+            }
+        }, error -> finishConsoleOptOutShutdown(oldRuntime, false, callback));
+    }
+
+    private static void finishConsoleOptOutShutdown(GeckoRuntime oldRuntime, boolean success,
+                                                   Consumer<Boolean> callback) {
+        synchronized (GeckoViewBrowserAdapter.class) {
+            if (runtime == oldRuntime) {
+                runtime = null;
+                activeProfilePath = null;
+            }
+            consoleExtension = null;
+            consoleExtensionFailed = !success;
+            consoleExtensionReady = success;
+            if (success) consoleExtensionRequested = false;
+        }
+        if (oldRuntime != null) oldRuntime.shutdown();
+        if (callback != null) MAIN.post(() -> callback.accept(success));
+    }
+
     void setJavaScriptEnabled(boolean enabled) {
         session.getSettings().setAllowJavascript(enabled);
     }
@@ -631,6 +858,7 @@ final class GeckoViewBrowserAdapter {
         session.setActive(visible);
         session.setFocused(visible);
         geckoView.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (!visible) setConsoleCaptureActive(false);
     }
 
     void setPinchToZoomEnabled(boolean enabled) {
@@ -702,6 +930,10 @@ final class GeckoViewBrowserAdapter {
                 pendingUrl = url;
                 return;
             }
+            if (!consoleExtensionReady) {
+                pendingUrl = url;
+                return;
+            }
         }
         session.getSettings().setAllowJavascript(!webRtcProtectionEnabled || javascriptFallback);
         session.loadUri(url);
@@ -732,6 +964,26 @@ final class GeckoViewBrowserAdapter {
     }
 
     void close() {
+        setConsoleCaptureActive(false);
+        WebExtension.Port activePort = consolePort;
+        consolePort = null;
+        if (activePort != null) {
+            try {
+                activePort.disconnect();
+            } catch (RuntimeException ignored) {
+                // Session teardown remains best effort.
+            }
+        }
+        WebExtension extension = consoleExtension;
+        if (extension != null) {
+            try {
+                session.getWebExtensionController().setMessageDelegate(extension, null,
+                        WebDebugPolicy.CONSOLE_NATIVE_APP);
+            } catch (RuntimeException ignored) {
+                // The runtime may already have started shutting down.
+            }
+        }
+        consoleEntryHandler = null;
         try {
             geckoView.releaseSession();
         } catch (RuntimeException ignored) {
@@ -756,6 +1008,10 @@ final class GeckoViewBrowserAdapter {
             oldRuntime = runtime;
             runtime = null;
             activeProfilePath = null;
+            consoleExtension = null;
+            consoleExtensionReady = true;
+            consoleExtensionFailed = false;
+            consoleExtensionRequested = false;
         }
         for (WeakReference<GeckoViewBrowserAdapter> reference : INSTANCES) {
             GeckoViewBrowserAdapter adapter = reference.get();

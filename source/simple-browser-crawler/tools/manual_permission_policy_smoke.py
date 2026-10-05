@@ -71,11 +71,12 @@ assert "hasLocationPermission()" in adapter
 
 main = (JAVA_ROOT / "com/cue/simplebrowser/MainActivity.java").read_text(encoding="utf-8")
 assert "Intent.ACTION_OPEN_DOCUMENT" in main
-assert "REQUEST_SELECT_WALLPAPER" in main
+assert "REQUEST_SELECT_WALLPAPER" not in main
+assert "WallpaperPickerFlow" not in main
 assert "REQUEST_IMPORT_EXTENSION_ZIP" in main
 
 print("PASS: exact optional permission allowlist; no broad media/sensor permissions")
 print("PASS: camera and microphone hardware features are explicitly optional")
 print("PASS: no Android dangerous-permission request API in application Java source")
 print("PASS: GeckoView requests are checked; missing/unsupported cases can be denied")
-print("PASS: user-selected file paths use the system document picker")
+print("PASS: generic file paths retain the system document picker; no wallpaper picker path remains")
