@@ -1,0 +1,2 @@
+224709505 bytes  SHA256  05fc2bbff1f5c5d4a9468b11ead2cb8d451c587c54f05c082dcad57f00a083d1  app-arm64-v8a-release.apk
+244072858 bytes  SHA256  d4d3bd462ec5f267b2abaeaee99a245c01d591e9470df06469d28305cf6adf85  app-x86_64-release.apk
