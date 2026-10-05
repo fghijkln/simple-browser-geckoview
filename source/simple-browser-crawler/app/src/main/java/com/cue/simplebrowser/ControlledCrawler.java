@@ -16,40 +16,129 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.TimeZone;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.function.Consumer;
 
 /**
- * A small, user-started crawler for public, same-origin HTTPS text pages.
+ * A user-started, serial crawler for public HTTPS text pages.
  * It never uses GeckoView sessions, cookies, authentication, JavaScript or a proxy.
  */
 final class ControlledCrawler {
     static final String USER_AGENT = "SimpleBrowserCrawler/1.0 (+user-initiated; static text only)";
-    static final int MAX_PAGES = 4;
-    static final int MAX_BODY_BYTES = 1_048_576;
-    static final int MAX_ROBOTS_BYTES = 524_288;
-    static final int MAX_LINKS = 12;
+    static final int MAX_PAGES = 100;
+    static final int DEFAULT_BODY_BYTES = 16 * 1_048_576;
+    static final int MAX_BODY_BYTES = DEFAULT_BODY_BYTES;
+    static final int DEFAULT_QUEUE_LIMIT = 10_000;
+    static final long DEFAULT_RATE_LIMIT_WAIT_MS = 30_000L;
+    static final int DEFAULT_ROBOTS_BYTES = 524_288;
+    static final int MAX_ROBOTS_BYTES = DEFAULT_ROBOTS_BYTES;
     static final int CONNECT_TIMEOUT_MS = 8_000;
     static final int READ_TIMEOUT_MS = 8_000;
-    static final int MAX_REDIRECTS = 3;
-    static final long MIN_REQUEST_GAP_MS = 2_000L;
-    static final long MAX_CRAWL_DELAY_MS = 30_000L;
-    static final long MAX_CRAWL_DURATION_MS = 90_000L;
+    static final int DEFAULT_REDIRECT_LIMIT = 3;
+    static final int MAX_REDIRECTS = DEFAULT_REDIRECT_LIMIT;
+    static final long MIN_REQUEST_GAP_MS = 1_000L;
+    static final long MAX_CRAWL_DURATION_MS = 1_800_000L;
     static final long ROBOTS_CACHE_TTL_MS = 5 * 60_000L;
     private static final int MAX_ROBOTS_CACHE_ENTRIES = 32;
     private static final ConcurrentHashMap<String, CachedRobots> ROBOTS_CACHE = new ConcurrentHashMap<>();
+
+    enum RobotsMode { RESPECT, IGNORE, ASK_EACH_BLOCKED }
+
+    static final class Configuration {
+        final int pageLimit;
+        final int queueLimit;
+        final long totalDurationMs;
+        final long perPageBytes;
+        final long minimumRequestGapMs;
+        final long rateLimitWaitMs;
+        final int redirectLimit;
+        final long robotsFileBytes;
+        final RobotsMode robotsMode;
+        final boolean askBeforeCrossSite;
+        final boolean askForNonSuccessResponses;
+
+        Configuration(int pageLimit, long totalDurationMs, long perPageBytes,
+                      long minimumRequestGapMs, RobotsMode robotsMode,
+                      boolean askBeforeCrossSite, boolean askForNonSuccessResponses) {
+            this(pageLimit, DEFAULT_QUEUE_LIMIT, totalDurationMs, perPageBytes, minimumRequestGapMs,
+                    DEFAULT_RATE_LIMIT_WAIT_MS, DEFAULT_REDIRECT_LIMIT, DEFAULT_ROBOTS_BYTES,
+                    robotsMode, askBeforeCrossSite, askForNonSuccessResponses);
+        }
+
+        Configuration(int pageLimit, int queueLimit, long totalDurationMs, long perPageBytes,
+                      long minimumRequestGapMs, long rateLimitWaitMs, RobotsMode robotsMode,
+                      boolean askBeforeCrossSite, boolean askForNonSuccessResponses) {
+            this(pageLimit, queueLimit, totalDurationMs, perPageBytes, minimumRequestGapMs,
+                    rateLimitWaitMs, DEFAULT_REDIRECT_LIMIT, DEFAULT_ROBOTS_BYTES, robotsMode,
+                    askBeforeCrossSite, askForNonSuccessResponses);
+        }
+
+        Configuration(int pageLimit, int queueLimit, long totalDurationMs, long perPageBytes,
+                      long minimumRequestGapMs, long rateLimitWaitMs, int redirectLimit,
+                      long robotsFileBytes, RobotsMode robotsMode,
+                      boolean askBeforeCrossSite, boolean askForNonSuccessResponses) {
+            if (pageLimit < 0 || queueLimit < 0 || totalDurationMs < 0 || perPageBytes < 0
+                    || minimumRequestGapMs < 0 || rateLimitWaitMs < 0 || redirectLimit < 0
+                    || robotsFileBytes < 0
+                    || robotsMode == null) throw new IllegalArgumentException("Invalid crawler configuration");
+            this.pageLimit = pageLimit;
+            this.queueLimit = queueLimit;
+            this.totalDurationMs = totalDurationMs;
+            this.perPageBytes = perPageBytes;
+            this.minimumRequestGapMs = minimumRequestGapMs;
+            this.rateLimitWaitMs = rateLimitWaitMs;
+            this.redirectLimit = redirectLimit;
+            this.robotsFileBytes = robotsFileBytes;
+            this.robotsMode = robotsMode;
+            this.askBeforeCrossSite = askBeforeCrossSite;
+            this.askForNonSuccessResponses = askForNonSuccessResponses;
+        }
+
+        static Configuration defaults() {
+            return new Configuration(MAX_PAGES, DEFAULT_QUEUE_LIMIT, MAX_CRAWL_DURATION_MS,
+                    DEFAULT_BODY_BYTES, MIN_REQUEST_GAP_MS, DEFAULT_RATE_LIMIT_WAIT_MS,
+                    DEFAULT_REDIRECT_LIMIT, DEFAULT_ROBOTS_BYTES, RobotsMode.RESPECT, false, true);
+        }
+    }
+
+    static final class Decision {
+        final String title;
+        final String message;
+        final String allowLabel;
+        final String denyLabel;
+        final String openInBrowserUrl;
+        Decision(String title, String message, String allowLabel, String denyLabel) {
+            this(title, message, allowLabel, denyLabel, null);
+        }
+        Decision(String title, String message, String allowLabel, String denyLabel,
+                 String openInBrowserUrl) {
+            this.title = title;
+            this.message = message;
+            this.allowLabel = allowLabel;
+            this.denyLabel = denyLabel;
+            this.openInBrowserUrl = openInBrowserUrl;
+        }
+    }
 
     interface Listener {
         void onStatus(String status);
         void onPage(Page page);
         void onFinished(Finish finish);
+        default void onDecision(Decision prompt, Consumer<Boolean> decision) { decision.accept(false); }
     }
 
     interface ConnectionOpener {
@@ -64,11 +153,17 @@ final class ControlledCrawler {
         final String url;
         final String title;
         final String summary;
+        final boolean serverResponseOnly;
 
         Page(String url, String title, String summary) {
+            this(url, title, summary, false);
+        }
+
+        Page(String url, String title, String summary, boolean serverResponseOnly) {
             this.url = url;
             this.title = title;
             this.summary = summary;
+            this.serverResponseOnly = serverResponseOnly;
         }
     }
 
@@ -101,13 +196,15 @@ final class ControlledCrawler {
         final String body;
         final String location;
         final String retryAfter;
+        final URI finalUri;
 
-        Response(int status, String contentType, String body, String location, String retryAfter) {
+        Response(int status, String contentType, String body, String location, String retryAfter, URI finalUri) {
             this.status = status;
             this.contentType = contentType;
             this.body = body;
             this.location = location;
             this.retryAfter = retryAfter;
+            this.finalUri = finalUri;
         }
     }
 
@@ -117,7 +214,7 @@ final class ControlledCrawler {
 
     private final ConnectionOpener opener;
     private final TargetPolicy targetPolicy;
-    private final long minimumGapMs;
+    private final Configuration configuration;
     private final boolean useRobotsCache;
     private final AtomicBoolean canceled = new AtomicBoolean();
     private volatile HttpURLConnection activeConnection;
@@ -126,20 +223,31 @@ final class ControlledCrawler {
 
     ControlledCrawler() {
         this(url -> (HttpURLConnection) url.openConnection(), ControlledCrawler::validatePublicHttpsTarget,
-                MIN_REQUEST_GAP_MS, true);
+                Configuration.defaults(), true);
     }
 
     ControlledCrawler(ConnectionOpener opener, TargetPolicy targetPolicy, long minimumGapMs) {
-        this(opener, targetPolicy, minimumGapMs, false);
+        this(opener, targetPolicy, new Configuration(MAX_PAGES, MAX_CRAWL_DURATION_MS,
+                DEFAULT_BODY_BYTES, minimumGapMs, RobotsMode.RESPECT, false, true), false);
     }
 
     ControlledCrawler(ConnectionOpener opener, TargetPolicy targetPolicy, long minimumGapMs, boolean useRobotsCache) {
-        if (opener == null || targetPolicy == null || minimumGapMs < 0) {
+        this(opener, targetPolicy, new Configuration(MAX_PAGES, MAX_CRAWL_DURATION_MS,
+                DEFAULT_BODY_BYTES, minimumGapMs, RobotsMode.RESPECT, false, true), useRobotsCache);
+    }
+
+    ControlledCrawler(ConnectionOpener opener, TargetPolicy targetPolicy, Configuration configuration) {
+        this(opener, targetPolicy, configuration, false);
+    }
+
+    ControlledCrawler(ConnectionOpener opener, TargetPolicy targetPolicy, Configuration configuration,
+                      boolean useRobotsCache) {
+        if (opener == null || targetPolicy == null || configuration == null) {
             throw new IllegalArgumentException("Incomplete crawler configuration");
         }
         this.opener = opener;
         this.targetPolicy = targetPolicy;
-        this.minimumGapMs = minimumGapMs;
+        this.configuration = configuration;
         this.useRobotsCache = useRobotsCache;
     }
 
@@ -156,92 +264,123 @@ final class ControlledCrawler {
         try {
             if (listener == null) throw new CrawlStop("没有可用的结果接收器。");
             checkCanceled();
-            deadlineAtMs = System.currentTimeMillis() + MAX_CRAWL_DURATION_MS;
+            long now = System.currentTimeMillis();
+            deadlineAtMs = configuration.totalDurationMs == 0 ? 0
+                    : configuration.totalDurationMs > Long.MAX_VALUE - now
+                    ? Long.MAX_VALUE : now + configuration.totalDurationMs;
             URI seed = parseAndNormalize(seedUrl);
             targetPolicy.validate(seed);
-            URI origin = originOf(seed);
-            String robotsKey = origin.toASCIIString();
-            RobotsPolicy robots = cachedRobots(robotsKey);
-            if (robots == null) {
-                listener.onStatus("先读取同站 robots.txt，检查访问规则…");
-                URI robotsUri = origin.resolve("/robots.txt");
-                Response robotsResponse = requestFollowingSameOriginRedirects(robotsUri, origin, MAX_ROBOTS_BYTES);
-                if (robotsResponse.status == 404 || robotsResponse.status == 410) {
-                    robots = RobotsPolicy.allowAll();
-                    cacheRobots(robotsKey, robots);
-                } else if (robotsResponse.status == 200) {
-                    if (!isTextContentType(robotsResponse.contentType)) {
-                        throw new CrawlStop("robots.txt 不是可读文本；为避免猜测站点规则，已停止。");
-                    }
-                    robots = RobotsPolicy.parse(robotsResponse.body);
-                    cacheRobots(robotsKey, robots);
-                } else {
-                    throw responseStop("robots.txt", robotsResponse);
-                }
-            } else {
-                listener.onStatus("使用 5 分钟内存缓存的同站 robots.txt 规则…");
-            }
-            if (robots.crawlDelayMs > MAX_CRAWL_DELAY_MS) {
-                throw new CrawlStop("站点声明的 Crawl-delay 超过 30 秒；本次抓取停止，不会缩短该间隔。");
-            }
-            long requestGap = Math.max(minimumGapMs, robots.crawlDelayMs);
+            URI seedOrigin = originOf(seed);
+            Set<String> approvedOrigins = new HashSet<>();
+            approvedOrigins.add(seedOrigin.toASCIIString());
+            Map<String, RobotsPolicy> robotsByOrigin = new HashMap<>();
             Deque<URI> queue = new ArrayDeque<>();
             Set<String> queued = new LinkedHashSet<>();
             queue.add(seed);
             queued.add(seed.toASCIIString());
-            int attempted = 0;
-            while (!queue.isEmpty() && pages.size() < MAX_PAGES && attempted < MAX_PAGES) {
+            long attempted = 0;
+            int pageLimit = configuration.pageLimit;
+            while (!queue.isEmpty() && (pageLimit == 0
+                    || (pages.size() < pageLimit && attempted < pageLimit))) {
                 checkCanceled();
                 URI pageUri = queue.removeFirst();
-                if (!robots.isAllowed(pathAndQuery(pageUri))) {
-                    if (attempted == 0) throw new CrawlStop("robots.txt 不允许抓取所提供的起始页面；已停止。");
-                    listener.onStatus("跳过 robots.txt 禁止的页面：" + pageUri.toASCIIString());
-                    continue;
+                URI pageOrigin = originOf(pageUri);
+                String originKey = pageOrigin.toASCIIString();
+                if (!approvedOrigins.contains(originKey)) throw new CrawlStop("未确认的跨站目标；未发送请求。");
+                RobotsPolicy robots = robotsByOrigin.get(originKey);
+                if (robots == null) robots = loadRobots(pageOrigin, approvedOrigins, robotsByOrigin, listener);
+                long requestGap = Math.max(configuration.minimumRequestGapMs, robots.crawlDelayMs);
+                if (!robots.isAllowed(pathAndQuery(pageUri))
+                        && configuration.robotsMode != RobotsMode.IGNORE) {
+                    boolean proceed = configuration.robotsMode == RobotsMode.ASK_EACH_BLOCKED
+                            && awaitDecision(listener, new Decision("robots.txt 访问规则",
+                            "robots.txt 对此路径标记为禁止：" + pageUri.toASCIIString()
+                                    + "\n允许只对本次抓取生效；你仍需自行确认已获授权。拒绝则跳过该页。",
+                            "本次继续", "跳过"));
+                    if (!proceed) {
+                        if (attempted == 0) throw new CrawlStop("robots.txt 不允许抓取所提供的起始页面；已停止。可在选项中改为询问或忽略。");
+                        listener.onStatus("按当前 robots 策略跳过页面：" + pageUri.toASCIIString());
+                        continue;
+                    }
                 }
-                listener.onStatus("读取公开静态页面 " + (attempted + 1) + " / " + MAX_PAGES + "…");
-                Response response = requestFollowingSameOriginRedirects(pageUri, origin, MAX_BODY_BYTES, requestGap);
+                listener.onStatus("读取公开静态页面 " + (attempted + 1) + " / "
+                        + (pageLimit == 0 ? "不限" : pageLimit) + "…");
+                Response response = requestWithChoices(pageUri, pageOrigin, configuration.perPageBytes,
+                        requestGap, approvedOrigins, listener);
                 attempted++;
-                if (response.status == 404 || response.status == 410) {
-                    listener.onStatus("页面返回 HTTP " + response.status + "，已跳过。");
+                if (response.location != null) {
+                    URI redirected;
+                    try { redirected = parseAndNormalize(response.location); }
+                    catch (IOException invalid) { throw new CrawlStop("跨站重定向地址无效；已停止。"); }
+                    enqueue(queue, queued, redirected, true);
                     continue;
                 }
-                if (response.status != 200) throw responseStop(pageUri.toASCIIString(), response);
+                if (response.status != 200) {
+                    if ((response.status == 401 || response.status == 403)
+                            && showServerResponseOnly(pageUri, response, listener, pages)) {
+                        throw new CrawlStop("仅展示了服务器本次实际返回的拒绝/登录提示；抓取已停止。此抓取器不使用浏览器登录态或 Cookie，无法读取需认证内容。");
+                    }
+                    String detail = "服务器返回 HTTP " + response.status + "：" + pageUri.toASCIIString()
+                            + "。选择继续仅表示处理其余已排队页面，不会重试或访问受保护内容。"
+                            + "本抓取器不使用浏览器登录态或 Cookie，需认证内容无法抓取；可自行在浏览器打开。";
+                    boolean proceed = configuration.askForNonSuccessResponses
+                            && awaitDecision(listener, new Decision("非成功 HTTP 响应", detail,
+                            "继续其他页面", "停止抓取"));
+                    if (!proceed) throw responseStop(pageUri.toASCIIString(), response);
+                    continue;
+                }
                 if (!isSupportedPageType(response.contentType)) {
                     listener.onStatus("跳过非 HTML/纯文本内容：" + pageUri.toASCIIString());
                     continue;
                 }
                 String signal = PageSignals.blockingReason(response.body);
-                if (signal != null) throw new CrawlStop(signal + "；没有尝试绕过。");
+                if (signal != null) {
+                    if (showServerResponseOnly(pageUri, response, listener, pages)) {
+                        throw new CrawlStop("按你的选择，仅展示服务器实际返回的静态文字并停止；这不是受保护内容，也未登录或绕过访问控制。需认证内容无法由此抓取器读取。");
+                    }
+                    throw new CrawlStop("服务器本次实际返回页疑似包含" + signal
+                            + "；未读取受保护内容或尝试绕过。你可自行在浏览器手动打开；此抓取器不会复用登录态/Cookie，不能抓取需认证内容。");
+                }
+                URI resultUri = response.finalUri == null ? pageUri : response.finalUri;
                 CrawlerHtmlParser.Document document = response.contentType.toLowerCase(Locale.ROOT).startsWith("text/plain")
                         ? CrawlerHtmlParser.parsePlain(response.body)
-                        : CrawlerHtmlParser.parse(response.body, pageUri.toASCIIString());
-                String title = document.title.trim().isEmpty() ? pageUri.getHost() : document.title.trim();
+                        : CrawlerHtmlParser.parse(response.body, resultUri.toASCIIString(), configuration.queueLimit);
+                String title = document.title.trim().isEmpty() ? resultUri.getHost() : document.title.trim();
                 String summary = summarize(document.text);
                 if (summary.isEmpty()) {
-                    listener.onStatus("页面没有可展示的静态文字，已跳过：" + pageUri.toASCIIString());
+                    listener.onStatus("页面没有可展示的静态文字，已跳过：" + resultUri.toASCIIString());
                     continue;
                 }
-                Page page = new Page(pageUri.toASCIIString(), title, summary);
+                Page page = new Page(resultUri.toASCIIString(), title, summary);
                 pages.add(page);
                 listener.onPage(page);
                 for (String link : document.links) {
-                    if (queued.size() >= MAX_LINKS + 1) break;
+                    if (configuration.queueLimit > 0 && queued.size() >= configuration.queueLimit) break;
                     URI candidate;
-                    try {
-                        candidate = parseAndNormalize(link);
-                        targetPolicy.validate(candidate);
-                    } catch (IOException | IllegalArgumentException ignored) {
-                        continue;
+                    try { candidate = parseAndNormalize(link); }
+                    catch (IOException | IllegalArgumentException ignored) { continue; }
+                    URI candidateOrigin = originOf(candidate);
+                    String candidateOriginKey = candidateOrigin.toASCIIString();
+                    if (!approvedOrigins.contains(candidateOriginKey)) {
+                        if (!configuration.askBeforeCrossSite) continue;
+                        boolean approved = awaitDecision(listener, new Decision("跨站目标确认",
+                                "发现页面链接指向另一个站点：" + candidateOriginKey
+                                        + "\n继续后仅对本次抓取放行此来源；仍要求 HTTPS 默认端口和公网地址。拒绝则跳过该目标。",
+                                "本次允许此站点", "跳过此站点"));
+                        if (!approved) continue;
+                        approvedOrigins.add(candidateOriginKey);
                     }
-                    if (!sameOrigin(origin, candidate)) continue;
+                    try { targetPolicy.validate(candidate); }
+                    catch (IOException | IllegalArgumentException unsafe) { continue; }
                     String normalized = candidate.toASCIIString();
-                    if (queued.add(normalized)) queue.addLast(candidate);
+                    enqueue(queue, queued, candidate, false);
                 }
             }
             checkCanceled();
             finishMessage = pages.isEmpty()
                     ? "没有找到可显示的静态文本页面。"
-                    : "完成：读取 " + pages.size() + " 个页面；仅限同一来源站点，最多 " + MAX_PAGES + " 页。";
+                    : "完成：读取 " + pages.size() + " 个页面；本次页面处理上限 "
+                    + (pageLimit == 0 ? "不限" : pageLimit) + "。";
         } catch (CrawlStop stop) {
             stopped = true;
             finishMessage = stop.getMessage();
@@ -262,24 +401,162 @@ final class ControlledCrawler {
         }
     }
 
-    private Response requestFollowingSameOriginRedirects(URI first, URI origin, int bodyLimit)
+    private RobotsPolicy loadRobots(URI origin, Set<String> approvedOrigins,
+                                    Map<String, RobotsPolicy> robotsByOrigin, Listener listener)
             throws IOException, InterruptedException {
-        return requestFollowingSameOriginRedirects(first, origin, bodyLimit, minimumGapMs);
+        String key = origin.toASCIIString();
+        if (configuration.robotsMode == RobotsMode.IGNORE) {
+            RobotsPolicy unrestricted = RobotsPolicy.allowAll();
+            robotsByOrigin.put(key, unrestricted);
+            listener.onStatus("按你的选择忽略该站 robots.txt：" + key);
+            return unrestricted;
+        }
+        RobotsPolicy robots = cachedRobots(key);
+        if (robots != null) {
+            listener.onStatus("使用 5 分钟内存缓存的 robots.txt 规则：" + key);
+            robotsByOrigin.put(key, robots);
+            return robots;
+        }
+        listener.onStatus("先读取该站 robots.txt：" + key);
+        Response response = requestWithChoices(origin.resolve("/robots.txt"), origin, configuration.robotsFileBytes,
+                configuration.minimumRequestGapMs, approvedOrigins, listener);
+        if (response.location != null) {
+            URI destination = parseAndNormalize(response.location);
+            URI destinationOrigin = originOf(destination);
+            response = requestWithChoices(destination, destinationOrigin, configuration.robotsFileBytes,
+                    configuration.minimumRequestGapMs, approvedOrigins, listener);
+        }
+        if (response.status == 404 || response.status == 410) {
+            robots = RobotsPolicy.allowAll();
+        } else if (response.status == 200 && isTextContentType(response.contentType)) {
+            robots = RobotsPolicy.parse(response.body);
+        } else {
+            String message = "无法读取 " + key + " 的 robots.txt（HTTP " + response.status
+                    + " 或非文本响应）。你可以选择本次继续且不应用未知规则，或停止。";
+            boolean proceed = configuration.robotsMode == RobotsMode.ASK_EACH_BLOCKED
+                    && awaitDecision(listener, new Decision("robots.txt 响应异常", message,
+                    "本次继续", "停止"));
+            if (!proceed) throw responseStop(key + "/robots.txt", response);
+            robots = RobotsPolicy.allowAll();
+        }
+        cacheRobots(key, robots);
+        robotsByOrigin.put(key, robots);
+        return robots;
     }
 
-    private Response requestFollowingSameOriginRedirects(URI first, URI origin, int bodyLimit, long requestGap)
+    private Response requestWithChoices(URI uri, URI origin, long bodyLimit, long requestGap,
+                                        Set<String> approvedOrigins, Listener listener)
+            throws IOException, InterruptedException {
+        while (true) {
+            checkCanceled();
+            Response response = requestFollowingSameOriginRedirects(uri, origin, bodyLimit, requestGap,
+                    approvedOrigins, listener);
+            if (response.status != 429 && response.status != 503) return response;
+            long serverWaitMs = retryAfterDelayMs(response.retryAfter);
+            long retryWaitMs = Math.max(configuration.rateLimitWaitMs, serverWaitMs);
+            long waitSeconds = retryWaitMs / 1000L + (retryWaitMs % 1000L == 0 ? 0 : 1);
+            String seconds = retryWaitMs == Long.MAX_VALUE ? "很长时间" : waitSeconds + " 秒";
+            String retryAfterText = serverWaitMs > configuration.rateLimitWaitMs
+                    ? "服务器 Retry-After 要求更长等待，仍将遵守该值。"
+                    : "当前设置的额外等待为 " + (configuration.rateLimitWaitMs / 1000L) + " 秒。";
+            boolean retry = awaitDecision(listener, new Decision("服务器限流/暂不可用",
+                    "收到 HTTP " + response.status + "。每次重试都必须单独确认；" + retryAfterText
+                            + "本次至少等待 " + seconds + "（另受你设定的请求间隔影响）。"
+                            + "0 秒表示不增加应用等待，不会自动重试；你仍可取消。",
+                    "等待后重试一次", "取消抓取"));
+            if (!retry) throw responseStop(uri.toASCIIString(), response);
+            waitForRetry(retryWaitMs);
+        }
+    }
+
+    private boolean awaitDecision(Listener listener, Decision prompt) throws InterruptedException, CrawlStop {
+        CountDownLatch ready = new CountDownLatch(1);
+        AtomicReference<Boolean> answer = new AtomicReference<>(false);
+        AtomicBoolean answered = new AtomicBoolean();
+        try {
+            listener.onDecision(prompt, allowed -> {
+                if (answered.compareAndSet(false, true)) {
+                    answer.set(Boolean.TRUE.equals(allowed));
+                    ready.countDown();
+                }
+            });
+        } catch (RuntimeException callbackFailure) {
+            return false;
+        }
+        while (!ready.await(200, TimeUnit.MILLISECONDS)) checkCanceled();
+        checkCanceled();
+        return answer.get();
+    }
+
+    private void waitForRetry(long requestedMs) throws InterruptedException, CrawlStop {
+        long waitMs = Math.max(requestedMs, configuration.minimumRequestGapMs);
+        long end = waitMs == Long.MAX_VALUE || System.currentTimeMillis() > Long.MAX_VALUE - waitMs
+                ? Long.MAX_VALUE : System.currentTimeMillis() + waitMs;
+        while (System.currentTimeMillis() < end) {
+            checkCanceled();
+            checkDeadline();
+            Thread.sleep(Math.min(250L, end - System.currentTimeMillis()));
+        }
+    }
+
+    private boolean showServerResponseOnly(URI pageUri, Response response, Listener listener,
+                                           List<Page> pages) throws InterruptedException, CrawlStop {
+        boolean hasText = response.body != null && !response.body.trim().isEmpty()
+                && isSupportedPageType(response.contentType);
+        String reason = PageSignals.blockingReason(response.body);
+        String label = response.status == 401 || response.status == 403
+                ? "HTTP " + response.status + " 拒绝/认证提示" : reason;
+        boolean display = awaitDecision(listener, new Decision("仅显示服务器实际响应",
+                "服务器本次实际返回的是 " + label + "。" + (hasText
+                        ? "你可只查看该响应中抽取出的静态文字；不会跟进此页链接、提交表单或尝试登录。"
+                        : "响应没有可显示的静态文字。")
+                        + "这不代表已取得受保护内容。抓取器不使用浏览器 Cookie/登录态；需认证内容无法抓取。",
+                hasText ? "仅显示此响应文字并停止" : "停止", "在浏览器手动打开并停止",
+                pageUri.toASCIIString()));
+        if (!display) return false;
+        if (!hasText) return true;
+        CrawlerHtmlParser.Document document = response.contentType.toLowerCase(Locale.ROOT)
+                .startsWith("text/plain") ? CrawlerHtmlParser.parsePlain(response.body)
+                : CrawlerHtmlParser.parse(response.body, pageUri.toASCIIString(), 0);
+        String visible = document.text == null || document.text.trim().isEmpty()
+                ? "服务器没有返回可显示的静态文字。" : document.text;
+        String title = document.title.trim().isEmpty()
+                ? "服务器响应（未认证） · " + pageUri.getHost() : document.title;
+        Page page = new Page(pageUri.toASCIIString(), title, visible, true);
+        pages.add(page);
+        listener.onPage(page);
+        return true;
+    }
+
+    private boolean enqueue(Deque<URI> queue, Set<String> queued, URI candidate, boolean first) {
+        String value = candidate.toASCIIString();
+        if (queued.contains(value)) return false;
+        if (configuration.queueLimit > 0 && queued.size() >= configuration.queueLimit) return false;
+        queued.add(value);
+        if (first) queue.addFirst(candidate); else queue.addLast(candidate);
+        return true;
+    }
+
+    private Response requestFollowingSameOriginRedirects(URI first, URI origin, long bodyLimit,
+                                                           long requestGap, Set<String> approvedOrigins,
+                                                           Listener listener)
             throws IOException, InterruptedException {
         URI current = first;
-        for (int redirects = 0; ; redirects++) {
+        long redirects = 0;
+        Set<String> visitedRedirects = new HashSet<>();
+        visitedRedirects.add(current.toASCIIString());
+        for (;;) {
             checkCanceled();
+            checkDeadline();
             targetPolicy.validate(current);
-            if (!sameOrigin(origin, current)) throw new CrawlStop("发现跨站重定向；为限制抓取范围已停止。");
+            if (!sameOrigin(origin, current)) throw new CrawlStop("请求目标与当前来源不一致；已停止。");
             waitForRequestSlot(requestGap);
             HttpURLConnection connection = opener.open(current.toURL());
             activeConnection = connection;
             connection.setInstanceFollowRedirects(false);
-            long remainingMs = deadlineAtMs - System.currentTimeMillis();
-            if (remainingMs <= 0) throw new CrawlStop("抓取超过 90 秒总时限；已停止。");
+            long remainingMs = deadlineAtMs == 0 ? Math.max(CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS)
+                    : deadlineAtMs - System.currentTimeMillis();
+            if (remainingMs <= 0) throw new CrawlStop(timeoutMessage());
             connection.setConnectTimeout((int) Math.min(CONNECT_TIMEOUT_MS, remainingMs));
             connection.setReadTimeout((int) Math.min(READ_TIMEOUT_MS, remainingMs));
             connection.setUseCaches(false);
@@ -293,36 +570,69 @@ final class ControlledCrawler {
             try {
                 int status = connection.getResponseCode();
                 String retryAfter = connection.getHeaderField("Retry-After");
+                String contentType = connection.getContentType();
                 if (isRedirect(status)) {
                     String location = connection.getHeaderField("Location");
-                    if (location == null || redirects >= MAX_REDIRECTS) {
-                        throw new CrawlStop("重定向缺少有效地址或超过 3 跳；已停止。");
+                    if (location == null || (configuration.redirectLimit > 0
+                            && redirects >= configuration.redirectLimit)) {
+                        throw new CrawlStop("重定向缺少有效地址或达到你设置的跳数上限 "
+                                + (configuration.redirectLimit == 0 ? "不限" : configuration.redirectLimit)
+                                + "；已停止。");
                     }
                     if (retryAfter != null && !retryAfter.trim().isEmpty()) {
                         throw new CrawlStop("重定向响应带有 Retry-After；为避免过早跟随，已停止。"
                                 + retryAfterHint(retryAfter));
                     }
                     URI next;
-                    try {
-                        next = parseAndNormalize(current.resolve(location).toASCIIString());
-                    } catch (IllegalArgumentException invalid) {
+                    try { next = parseAndNormalize(current.resolve(location).toASCIIString()); }
+                    catch (IOException | IllegalArgumentException invalid) {
                         throw new CrawlStop("重定向目标无效；已停止。");
                     }
-                    if (!sameOrigin(origin, next)) throw new CrawlStop("发现跨站重定向；为限制抓取范围已停止。");
+                    URI nextOrigin = originOf(next);
+                    if (!sameOrigin(origin, next)) {
+                        String key = nextOrigin.toASCIIString();
+                        if (!approvedOrigins.contains(key)) {
+                            boolean allow = configuration.askBeforeCrossSite
+                                    && awaitDecision(listener, new Decision("跨站重定向确认",
+                                    "服务器将请求重定向到：" + key + "\n这会使抓取器向该站发送新请求。"
+                                            + "仍要求 HTTPS 默认端口与公网地址；拒绝则不访问目标。",
+                                    "本次允许此站点", "停止跟随"));
+                            if (!allow) throw new CrawlStop("用户未批准跨站重定向；目标未被请求：" + key);
+                            approvedOrigins.add(key);
+                        }
+                        targetPolicy.validate(next);
+                        return new Response(status, contentType, "", next.toASCIIString(), retryAfter, current);
+                    }
                     targetPolicy.validate(next);
+                    if (!visitedRedirects.add(next.toASCIIString())) {
+                        throw new CrawlStop("检测到重定向循环；为避免重复请求已停止。");
+                    }
+                    redirects++;
                     current = next;
                     continue;
                 }
-                String contentType = connection.getContentType();
                 String body = "";
                 if (status == 200) {
                     long length = connection.getContentLengthLong();
-                    if (length > bodyLimit) throw new CrawlStop("响应超过 " + bodyLimit + " 字节上限；已停止。");
+                    if (bodyLimit > 0 && length > bodyLimit) {
+                        throw new CrawlStop("响应超过 " + bodyLimit + " 字节上限；已停止。");
+                    }
                     try (InputStream input = connection.getInputStream()) {
                         body = readBoundedText(input, bodyLimit, charsetFrom(contentType), deadlineAtMs);
                     }
+                } else if (status == 401 || status == 403) {
+                    InputStream errorBody = connection.getErrorStream();
+                    if (errorBody != null) {
+                        long length = connection.getContentLengthLong();
+                        if (bodyLimit > 0 && length > bodyLimit) {
+                            throw new CrawlStop("拒绝响应正文超过所选字节上限；已停止。");
+                        }
+                        try (InputStream input = errorBody) {
+                            body = readBoundedText(input, bodyLimit, charsetFrom(contentType), deadlineAtMs);
+                        }
+                    }
                 }
-                return new Response(status, contentType, body, null, retryAfter);
+                return new Response(status, contentType, body, null, retryAfter, current);
             } finally {
                 connection.disconnect();
                 activeConnection = null;
@@ -352,15 +662,25 @@ final class ControlledCrawler {
 
     private void waitForRequestSlot(long requestedGapMs) throws InterruptedException, CrawlStop {
         checkCanceled();
-        long gap = Math.max(minimumGapMs, requestedGapMs);
+        long gap = Math.max(0L, requestedGapMs);
         long remaining = lastRequestStartedMs == 0 ? 0 : gap - (System.currentTimeMillis() - lastRequestStartedMs);
         while (remaining > 0) {
             checkCanceled();
-            if (deadlineAtMs > 0 && System.currentTimeMillis() >= deadlineAtMs)
-                throw new CrawlStop("抓取超过 90 秒总时限；已停止。");
+            checkDeadline();
             Thread.sleep(Math.min(remaining, 200L));
             remaining = gap - (System.currentTimeMillis() - lastRequestStartedMs);
         }
+    }
+
+    private void checkDeadline() throws CrawlStop {
+        if (deadlineAtMs > 0 && System.currentTimeMillis() >= deadlineAtMs) {
+            throw new CrawlStop(timeoutMessage());
+        }
+    }
+
+    private String timeoutMessage() {
+        return configuration.totalDurationMs == 0 ? "抓取已取消。"
+                : "已达到你设置的抓取总时长上限（" + (configuration.totalDurationMs / 1000L) + " 秒）；已停止。";
     }
 
     private void checkCanceled() throws CrawlStop {
@@ -381,6 +701,26 @@ final class ControlledCrawler {
         if (response.status >= 500) return new CrawlStop("HTTP " + response.status + " 服务端错误（" + page + "）；已停止。");
         if (response.status >= 300 && response.status < 400) return new CrawlStop("HTTP " + response.status + " 重定向无法安全跟随（" + page + "）；已停止。");
         return new CrawlStop("无法读取 " + page + "：HTTP " + response.status + "；已停止。");
+    }
+
+    private long retryAfterDelayMs(String value) {
+        if (value == null || value.trim().isEmpty()) return 0L;
+        String trimmed = value.trim();
+        try {
+            long seconds = Long.parseLong(trimmed);
+            if (seconds >= 0) return seconds > Long.MAX_VALUE / 1000L
+                    ? Long.MAX_VALUE : seconds * 1000L;
+        } catch (NumberFormatException ignored) { }
+        try {
+            SimpleDateFormat format = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US);
+            format.setTimeZone(TimeZone.getTimeZone("GMT"));
+            ParsePosition position = new ParsePosition(0);
+            Date date = format.parse(trimmed, position);
+            if (date != null && position.getIndex() == trimmed.length()) {
+                return Math.max(0L, date.getTime() - System.currentTimeMillis());
+            }
+        } catch (IllegalArgumentException ignored) { }
+        return 0L;
     }
 
     private static String retryAfterHint(String value) {
@@ -429,16 +769,20 @@ final class ControlledCrawler {
         return StandardCharsets.UTF_8;
     }
 
-    private static String readBoundedText(InputStream input, int limit, Charset charset, long deadlineAtMs)
+    private static String readBoundedText(InputStream input, long limit, Charset charset, long deadlineAtMs)
             throws IOException, CrawlStop {
-        ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 16_384));
+        ByteArrayOutputStream output = new ByteArrayOutputStream((int) Math.min(limit, 16_384L));
         byte[] buffer = new byte[8_192];
         int read;
         while (true) {
-            if (System.currentTimeMillis() >= deadlineAtMs) throw new CrawlStop("抓取超过 90 秒总时限；已停止。");
+            if (deadlineAtMs > 0 && System.currentTimeMillis() >= deadlineAtMs) {
+                throw new CrawlStop("抓取超过你设置的总时长；已停止。");
+            }
             read = input.read(buffer);
             if (read < 0) break;
-            if (output.size() + (long) read > limit) throw new CrawlStop("响应正文超过字节上限；已停止。");
+            if (limit > 0 && output.size() + (long) read > limit) {
+                throw new CrawlStop("响应正文超过你设置的字节上限；已停止。");
+            }
             output.write(buffer, 0, read);
         }
         return new String(output.toByteArray(), charset);
@@ -487,7 +831,7 @@ final class ControlledCrawler {
 
     private static int effectivePort(URI uri) { return uri.getPort() < 0 ? 443 : uri.getPort(); }
 
-    private static void validatePublicHttpsTarget(URI uri) throws IOException {
+    static void validatePublicHttpsTarget(URI uri) throws IOException {
         if (!"https".equalsIgnoreCase(uri.getScheme())) throw new CrawlStop("此版本只抓取 HTTPS 页面；不会降级到明文 HTTP。");
         if (effectivePort(uri) != 443) throw new CrawlStop("只允许 HTTPS 默认端口 443，以限制抓取范围。");
         String host = uri.getHost();

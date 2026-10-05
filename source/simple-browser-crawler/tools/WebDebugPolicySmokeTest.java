@@ -9,73 +9,99 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Offline checks for opt-in debug features, metadata-only capture, and unchanged Android privileges. */
+/** Offline checks for relaxed debug defaults with the requested data/privilege boundaries retained. */
 public final class WebDebugPolicySmokeTest {
     public static void main(String[] args) throws Exception {
         if (args.length != 7) {
             throw new IllegalArgumentException("expected adapter, Android manifest, guard, extension manifest, main script, relay script, MainActivity");
         }
-        check(!WebDebugPolicy.REMOTE_DEBUGGING_DEFAULT, "remote debugging must default off");
-        check(!WebDebugPolicy.IN_APP_CONSOLE_DEFAULT, "in-app console authorization must default off");
-        check(WebDebugPolicy.CONSOLE_RING_CAPACITY == 500, "metadata ring must remain capped at 500 events");
-        check(WebDebugPolicy.CONSOLE_MAX_ARGUMENTS == 64, "argument count must be bounded");
-        check(!WebDebugPolicy.remoteDebuggingEnabled(false, true), "missing remote preference is not consent");
-        check(!WebDebugPolicy.inAppConsoleEnabled(false, true), "missing console preference is not consent");
+        check(WebDebugPolicy.REMOTE_DEBUGGING_DEFAULT, "remote debugging defaults enabled");
+        check(WebDebugPolicy.IN_APP_CONSOLE_DEFAULT, "in-app Console defaults enabled");
+        check(WebDebugPolicy.CONSOLE_RING_CAPACITY == 5_000, "default Console row capacity remains finite");
+        check(Arrays.equals(WebDebugPolicy.consoleCapacityOptions(), new int[] {500, 1_000, 2_500, 5_000, 0}),
+                "Console row count offers finite choices and explicit Unlimited");
+        check(WebDebugPolicy.normalizeConsoleCapacity(2_500) == 2_500
+                        && WebDebugPolicy.normalizeConsoleCapacity(4_000) == 5_000
+                        && WebDebugPolicy.normalizeConsoleCapacity(0) == 0,
+                "unsupported row choices normalize while zero remains Unlimited");
+        check(Arrays.equals(WebDebugPolicy.consoleEntryLimitOptions(), new int[] {16_384, 65_536, 0})
+                        && Arrays.equals(WebDebugPolicy.consoleRateLimitOptions(), new int[] {15, 60, 120, 0}),
+                "entry size and event rate each provide explicit Unlimited choices");
+        check(WebDebugPolicy.normalizeConsoleEntryLimit(0) == 0
+                        && WebDebugPolicy.normalizeConsoleRateLimit(0) == 0
+                        && WebDebugPolicy.consoleMaxArguments(0) == 0
+                        && WebDebugPolicy.consoleMaxArgumentChars(0) == 0
+                        && WebDebugPolicy.consoleMaxArguments(WebDebugPolicy.CONSOLE_MAX_ENTRY_CHARS) == 0
+                        && WebDebugPolicy.consoleMaxArgumentChars(WebDebugPolicy.CONSOLE_MAX_ENTRY_CHARS)
+                        == WebDebugPolicy.CONSOLE_MAX_ENTRY_CHARS,
+                "argument count is not hidden behind a fixed cap; per-argument characters follow the chosen entry limit");
+        check(WebDebugPolicy.remoteDebuggingEnabled(false, false), "missing remote preference uses relaxed default");
+        check(WebDebugPolicy.inAppConsoleEnabled(false, false), "missing Console preference uses relaxed default");
         check(!WebDebugPolicy.remoteDebuggingEnabled(true, false), "explicit remote opt-out remains off");
-        check(!WebDebugPolicy.inAppConsoleEnabled(true, false), "explicit console opt-out remains off");
+        check(!WebDebugPolicy.inAppConsoleEnabled(true, false), "explicit Console opt-out remains off");
         check(WebDebugPolicy.remoteDebuggingEnabled(true, true), "remote mode supports explicit opt-in");
-        check(WebDebugPolicy.inAppConsoleEnabled(true, true), "console authorization can be explicitly opted in");
+        check(WebDebugPolicy.inAppConsoleEnabled(true, true), "Console supports explicit opt-in");
 
         String adapter = read(args[0]);
         String mainActivity = read(args[6]);
+        check(mainActivity.contains("showConsoleBufferLimitDialog")
+                        && mainActivity.contains("CONSOLE_BUFFER_CAPACITY_PREFERENCE")
+                        && mainActivity.contains("setSingleChoiceItems")
+                        && mainActivity.contains("showConsoleEntryLimitDialog")
+                        && mainActivity.contains("showConsoleRateLimitDialog")
+                        && mainActivity.contains("showConsoleUnlimitedConfirmation")
+                        && mainActivity.contains("webConsoleBuffer.capacity()"),
+                "Settings exposes finite/unlimited row, entry, and rate policies with risk confirmation");
         check(adapter.contains(".remoteDebuggingEnabled(remoteDebuggingEnabled)"),
-                "GeckoRuntime builder must use gated remote debugging");
-        check(adapter.contains("debugPreferences.contains(WebDebugPolicy.REMOTE_DEBUGGING_PREFERENCE)"),
-                "missing remote preference must not count as consent");
-        check(adapter.contains(".consoleOutput(false)"), "consoleOutput must stay off to avoid logcat persistence");
-        check(adapter.contains(".extensionsWebAPIEnabled(false)"), "Add-on Manager web API must stay off");
+                "GeckoRuntime builder must use GeckoView's remote-debugging API");
+        check(adapter.contains("REMOTE_DEBUGGING_DEFAULT") && mainActivity.contains("IN_APP_CONSOLE_DEFAULT"),
+                "Runtime and MainActivity must consult their relaxed feature defaults");
+        check(adapter.contains(".consoleOutput(false)"), "consoleOutput remains off to avoid logcat persistence");
+        check(adapter.contains(".extensionsWebAPIEnabled(false)"), "Add-on Manager web API stays off");
         check(adapter.contains("configureConsoleExtension(runtime, consolePanelRequested)"),
-                "extension lifecycle must be controlled by one-shot explicit panel-open request, not stored consent");
+                "extension install lifecycle remains gated by explicit panel-open request");
         String installLifecycle = adapter.substring(adapter.indexOf("private static void configureConsoleExtension("),
                 adapter.indexOf("private static WebExtension findConsoleExtension("));
         check(installLifecycle.indexOf("if (enabled)")
                         < installLifecycle.indexOf("ensureBuiltIn(WebDebugPolicy.CONSOLE_EXTENSION_URI"),
-                "extension installation must be nested below panel-open request");
+                "extension installation remains nested below explicit panel-open request");
         check(mainActivity.contains("IN_APP_CONSOLE_PANEL_REQUEST_PREFERENCE")
                         && mainActivity.contains("pendingConsolePanelOpen")
                         && mainActivity.contains("requestConsolePanelOpen()"),
-                "explicit Open-panel action must create the one-shot installation request");
+                "Open-panel action remains an explicit installation request");
         check(mainActivity.contains("shutdownForConsolePanelClose")
                         && mainActivity.contains("webConsoleBuffer.clear()"),
-                "panel close must clear memory, close sessions, and uninstall extension");
+                "panel close clears memory, closes sessions, and uninstalls extension");
         check(adapter.contains("controller.uninstall(stale)")
                         && adapter.contains("shutdownForConsolePanelClose")
                         && adapter.contains("setMessageDelegate(extension, null"),
-                "stale and active extension copies must be removed with session delegates");
+                "stale and active extension copies are removed with message delegates");
         check(adapter.contains("sender.isTopLevel()") && adapter.contains("sender.session == session")
                         && adapter.contains("WebDebugPolicy.sameHttpOrigin"),
-                "native channel must validate extension sender, frame, session, and origin");
+                "native channel validates extension sender, top-level frame, active session, and origin");
         check(adapter.contains("payload.opt(\"category\")")
                         && adapter.contains("payload.opt(\"level\")")
                         && adapter.contains("payload.opt(\"argumentCount\")")
-                        && !adapter.contains("payload.optString(\"message\"")
-                        && !adapter.contains("payload.opt(\"stack\")"),
-                "native parser must read only fixed metadata and argument count");
-        check(!adapter.contains("evaluateJS") && !adapter.contains("window.eval"),
-                "do not use general-purpose JS injection");
+                        && adapter.contains("payload.opt(\"content\")")
+                        && adapter.contains("currentConsoleEntryLimit()")
+                        && adapter.contains("state.put(\"maxEntryChars\""),
+                "native parser and extension use the selected raw-text limits");
+        check(!adapter.contains("evaluateJS") && !adapter.contains("window.eval")
+                        && !mainActivity.contains("addJavascriptInterface"),
+                "no generic JS bridge or native evaluation is added");
 
         String extension = read(args[3]);
         check(extension.contains("\"world\": \"MAIN\"")
                         && extension.contains("\"world\": \"ISOLATED\""),
-                "scripts must use explicit MAIN/ISOLATED worlds");
+                "scripts use explicit MAIN/ISOLATED worlds");
         check(extension.contains("\"all_frames\": false"), "only top-level frames may be instrumented");
         check(extension.contains("\"http://*/*\"") && extension.contains("\"https://*/*\""),
-                "all HTTP(S) hosts must be explicitly represented for injection");
+                "all HTTP(S) hosts remain explicit and install prompt is retained");
         for (String forbidden : Arrays.asList("\"cookies\"", "\"webRequest\"", "\"tabs\"")) {
             check(!extension.contains(forbidden), "unneeded WebExtension permission present: " + forbidden);
         }
         check(extension.contains("nativeMessagingFromContent") && extension.contains("geckoViewAddons"),
-                "GeckoView native content-script messaging permissions must be explicit");
+                "GeckoView native content-script messaging permissions are explicit");
 
         String mainScript = read(args[4]);
         String relayScript = read(args[5]);
@@ -84,18 +110,20 @@ public final class WebDebugPolicySmokeTest {
                         && mainScript.contains("removeEventListener(\"error\"")
                         && mainScript.contains("removeEventListener(\"unhandledrejection\"")
                         && mainScript.contains("[\"log\", \"warn\", \"error\"]")
-                        && mainScript.contains("args.length"),
-                "MAIN world observes only requested levels and emits argument counts");
-        for (String forbidden : Arrays.asList("event.message", "event.reason", "event.error", ".stack",
-                ".filename", "data.message", "message:", "url:", "timestamp:")) {
+                        && mainScript.contains("formatArguments") && mainScript.contains("value.stack"),
+                "capture includes console arguments and explicit Error text/stack only while active");
+        for (String forbidden : Arrays.asList("document.querySelector", "document.forms", "document.cookie",
+                "requestBody", "responseBody", "XMLHttpRequest", "fetch(")) {
             check(!mainScript.contains(forbidden) && !relayScript.contains(forbidden),
-                    "capture scripts must not inspect/emit page text or source metadata: " + forbidden);
+                    "capture scripts must not read DOM/form/cookie/network payload: " + forbidden);
         }
-        check(relayScript.contains("connectNative(\"browser\")")
-                        && relayScript.contains("captureActive")
-                        && relayScript.contains("argumentCount")
-                        && relayScript.contains("MAX_ARGUMENTS"),
-                "native relay must be opt-in and forward bounded metadata only");
+        check(!mainScript.contains("timestamp:") && !relayScript.contains("timestamp:")
+                        && !mainScript.contains("url:") && !relayScript.contains("url:"),
+                "capture records contain no app-generated wall time or page URL field");
+        check(relayScript.contains("connectNative(\"browser\")") && relayScript.contains("captureActive")
+                        && relayScript.contains("maxEntryChars > 0 && data.content.length > maxEntryChars")
+                        && mainScript.contains("maxEntryChars === 0"),
+                "native relay remains opt-in and validates finite caps while passing the explicit Unlimited mode");
 
         String manifest = read(args[1]);
         Set<String> permissions = matches(manifest, "<uses-permission\\s+android:name=\"([^\"]+)\"");
@@ -113,11 +141,11 @@ public final class WebDebugPolicySmokeTest {
 
         String guard = read(args[2]);
         check(guard.contains("EXPECTED_SYSTEM_PERMISSIONS")
-                        && guard.contains("APPROVED_DANGEROUS_PERMISSIONS"), "privilege guard allowlist missing");
+                        && guard.contains("APPROVED_DANGEROUS_PERMISSIONS"), "privilege guard allowlist remains present");
         check(!guard.contains("android.permission.ACCESS_WIFI_STATE")
                         && !guard.contains("android.permission.CHANGE_WIFI_STATE"),
                 "debugging must not add Wi-Fi permissions");
-        System.out.println("Web debug policy smoke test: PASS (both features default off; explicit panel request gates install; metadata-only capture; Android privileges unchanged)");
+        System.out.println("Web debug policy smoke test: PASS (default-enabled Gecko API, explicit install prompt, top-frame/raw text only, finite and Unlimited row/entry/rate controls, unchanged Android privileges)");
     }
 
     private static Set<String> componentNames(String xml) {

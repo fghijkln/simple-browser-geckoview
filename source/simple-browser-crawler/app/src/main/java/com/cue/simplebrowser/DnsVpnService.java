@@ -68,7 +68,9 @@ public final class DnsVpnService extends VpnService {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        BrowserPrivilegeGuard.verifyOrThrow(this);
+        for (String finding : BrowserPrivilegeGuard.inspect(this)) {
+            Log.w(TAG, "Privilege health notice: " + finding);
+        }
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             stopSelf();
             return START_NOT_STICKY;

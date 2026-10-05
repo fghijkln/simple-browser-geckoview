@@ -11,8 +11,8 @@ android {
         applicationId 'com.cue.simplebrowser'
         minSdk 29
         targetSdk 35
-        versionCode 18
-        versionName '2.8.1'
+        versionCode 19
+        versionName '2.9.0'
     }
 
     signingConfigs {

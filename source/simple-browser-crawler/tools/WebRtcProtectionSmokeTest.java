@@ -38,18 +38,21 @@ public final class WebRtcProtectionSmokeTest {
         require(adapter, "GeckoRuntimeSettings.HTTPS_ONLY", "enable GeckoView HTTPS-only");
         require(adapter, "GeckoRuntimeSettings.TRR_MODE_ONLY", "disable native Do53 fallback");
         require(adapter, "https://dns.quad9.net/dns-query", "use the selected Quad9 RFC8484 URI");
-        require(adapter, "permissionCallback.reject()", "deny Android requests when system permission is missing or unsupported");
+        require(adapter, "permissionCallback.reject()", "deny Android requests when system permission is denied or unsupported");
         require(adapter, "hasOnlySupportedAndroidPermissions(permissions)", "reject undeclared/unsupported Android permissions");
         require(adapter, "ContentPermission.VALUE_DENY", "deny unsupported Gecko content permissions");
         require(adapter, "mediaCallback.reject()", "deny unsupported media sources or missing Android permissions");
         require(adapter, "mediaCallback.grant(videoSource, audioSource)", "allow supported media only after system and site consent");
         require(adapter, "requestSitePermission", "ask for separate per-site consent after Android permission is present");
-        pass("strict ETP, HTTPS-only, Quad9 TRR-only, and manual system/site permission gates");
+        require(adapter, "requestRuntimePermissions(", "request allowlisted Android permissions at webpage request time");
+        require(adapter, "handler.requestSystemPermissions(missing.toArray(new String[0])",
+                "route dangerous permission requests through the Activity system dialog");
+        pass("strict ETP, HTTPS-only, Quad9 TRR-only, and runtime-system then per-site consent gates");
 
         check(manifest.contains("android:usesCleartextTraffic=\"false\""),
                 "Android manifest must disallow cleartext traffic");
         check(manifest.contains("android.permission.CAMERA") && manifest.contains("android.permission.RECORD_AUDIO"),
-                "manifest must declare optional camera and microphone permissions for manual settings grants");
+                "manifest must declare optional camera and microphone permissions for runtime requests");
         check(manifest.contains("android.permission.ACCESS_COARSE_LOCATION")
                         && manifest.contains("android.permission.ACCESS_FINE_LOCATION"),
                 "manifest must declare optional coarse and fine location permissions");
@@ -59,11 +62,10 @@ public final class WebRtcProtectionSmokeTest {
                 "camera, autofocus, and microphone hardware features must remain optional");
         require(adapter, "PackageManager.FEATURE_CAMERA_ANY", "deny camera use when no camera hardware is present");
         require(adapter, "PackageManager.FEATURE_MICROPHONE", "deny microphone use when no microphone hardware is present");
-        check(!adapter.contains("ActivityCompat.requestPermissions(")
-                        && !adapter.contains("requestPermissions(")
-                        && !main.contains("ActivityCompat.requestPermissions(")
-                        && !main.contains("requestPermissions("),
-                "application must not automatically request Android runtime permissions");
+        check(main.contains("requestPermissions(request.permissions, REQUEST_BROWSER_RUNTIME_PERMISSIONS)")
+                        && main.contains("onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults)")
+                        && main.contains("requestBrowserSitePermission(permissionLabel, origin, decision)"),
+                "Android system consent is requested first, then Gecko still asks for per-site consent");
         check(gradle.contains("org.mozilla.geckoview:geckoview:157.0.20260924084938"),
                 "build must be pinned to the audited GeckoView version");
         check(!gradle.toLowerCase().contains("cefrium") && !gradle.toLowerCase().contains("chromium"),
@@ -72,7 +74,8 @@ public final class WebRtcProtectionSmokeTest {
                 "application must not add WebView/JavaScript bridges");
         require(strings, "Experimental", "disclose experimental WebRTC API status to users");
         require(strings, "尚未在 Android 真机验证", "disclose device verification boundary");
-        pass("no cleartext traffic, no automatic Android permission request, pinned engine and transparent limitations");
+        require(strings, "然后仍须逐站确认", "disclose that Android grant does not replace site-specific consent");
+        pass("no cleartext traffic, allowlisted Android runtime permission request, pinned engine, and transparent limitations");
         System.out.println("PASS: source-only checks; no runtime, public detector, or external DNS query was used");
     }
 

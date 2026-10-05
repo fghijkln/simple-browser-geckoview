@@ -1,0 +1,11 @@
+2981848b16070177c0a7aecd26d8f8feb73e1d007f94d8ca9aa2ebd5fee2652f  release-artifacts/SimpleBrowser-2.9.0-arm64-v8a.apk
+f12aa570a405758fc6c090c71d35adb7fded574b96ac4d2bbf12d91dba0c2bec  release-artifacts/SimpleBrowser-2.9.0-x86_64.apk
+3587b0d24d84ba04edcd0cf3263605af02a83ceeaf849f42c7e6c9f25557b54b  release-artifacts/SimpleBrowser-2.9.0-source.zip
+c37535356969838e42460bb8ba390a6b91b8e648fdeba5f166e8541b93290993  REPORT.md
+3c3a99a15fa35e03f26e695683b4773546aa10bddf5990f075623d8a903bedf8  RELEASE-NOTES-v0.6-zh-CN.md
+4db2ac66dac2b5345c868455431646ce2f895e8070c487a0d72f7195471e08b6  RELEASE-NOTES-v0.6-en.md
+bd5fa4e46d29041e530a5d23e8bc949679188f17db867261fec1ee9abe223a8b  MANIFEST-AUDIT-v0.6.txt
+0c91c5ef3996356ccd35a1ba4847ff18c4cf2e9c1ff02d81b31b72fe017c89b3  BUILD-2.9.0-final-followup.log
+e899f2092eb4fcd7ef38c80ec11c9a4955d40e6f714296c1d6a48f058e39d29c  LINT-REPORT-2.9.0-final.txt
+95f4a4b07e8172c59a68c9f8da13e8edda492ba7b9fa081544472a58552e19b6  source/simple-browser-crawler/test-results/crawler-local-mock-test.log
+b32a0552fc48fe0ee7e82e2af2976ce543a9480e1924b39e6eb01a5d97e49c1b  source/simple-browser-crawler/test-results/geckoview-local-tests.log

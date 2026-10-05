@@ -1,18 +1,23 @@
-# 简浏览 Android 源码工程（v0.5 / 2.8.1）
+# 简浏览 Android 源码工程（本地 v0.6 候选 / 2.9.0）
 
-本目录是公开发行 **v0.5**（应用版本 **2.8.1 / versionCode 18**）的完整 Android Gradle 工程。仓库根目录的[双语项目说明](../../README.md)提供下载、功能摘要与验证范围；[双语发行说明](../../RELEASE-NOTES-v0.5.md)记录此次壁纸与网页调试变化。
+本目录是基于公开 v0.5 commit `26a28a72d10a7907e8a995c8f2cf03568765af5d` 的 Android Gradle 工程修改副本。**v0.6/2.9.0 仅为本地候选，尚未远端发布；APK 由 Android Debug 证书签名，不是商店生产签名。**项目范围、兼容说明、剩余技术边界、回归/build/Manifest审计及真机验证限制见仓库顶层的[中文报告](../../REPORT.md)、[简中发行说明](../../RELEASE-NOTES-v0.6-zh-CN.md)、[英文发行说明](../../RELEASE-NOTES-v0.6-en.md)和[Manifest审计](../../MANIFEST-AUDIT-v0.6.txt)。
 
-新标签页包含七张离线内置壁纸，按设备当前时区的本地日历日期强制每日轮换，没有手动切换入口。开发者设置中的 USB/ADB Firefox DevTools 和页内 Console/Errors 面板均默认关闭。Console 扩展只会在用户明确打开面板时安装，且需接受所有 HTTP/HTTPS 网站的 host permission；面板只在内存保留受限 metadata，不采集日志正文或页面 URL。关闭会清空、卸载并重启 Runtime。细节与限制见[中文网页调试说明](docs/WEB-DEBUGGING.md)、[English guide](docs/WEB-DEBUGGING.en.md)及[网页调试 API 审计](evidence/GECKOVIEW-WEB-DEBUG-API-AUDIT.md)。
+## v0.6候选变化
 
-Android Manifest 与应用特权守卫沿用 v0.4 的已审阅实现；网页调试和每日轮换没有新增 Android 权限。Release APK 使用项目保留的 Android Debug 签名证书，不是应用商店生产密钥。离线构建或静态检查不等于真机验证；本版没有设备实测网页调试连接或壁纸呈现。完整测试和校验记录见仓库根目录的[构建报告](../../BUILD-REPORT.md)。
+启动时显示简中/英文风险告知，列出应用特权检查发现并由用户选择继续或退出；非致命守卫状态不再单独阻断，致命损坏仍失败。USB/ADB DevTools与页内Console默认开放且可在设置关闭；Console安装仍请求全站host permission，输出当前顶层页可含敏感信息的原始日志文本/错误/stack。Console条数、单条文字/参数长度和事件速率均提供有限值或“不限”，不限仍受Android/Java堆与数据类型边界约束。
 
-## 本地构建
+摄像头、麦克风、位置网页请求可启动系统runtime permission弹窗，系统授予后仍逐站点确认。抓取由用户显式启动、前台串行执行，提供页数、队列、总时长、单页/robots字节、同源重定向、请求间隔和429/503等待的有限值或0=不限档。实际无限内存并无保证；429/503逐次确认且遵守服务器`Retry-After`，认证/CAPTCHA/付费墙不会被绕过，抓取器不共享浏览器登录态。
 
-需要 JDK 21、Gradle Wrapper 9.7.1、Android Gradle Plugin 9.4.0 和 Android SDK API 37（minor 2）；`minSdk 29`、`targetSdk 35`，输出仅包括 `arm64-v8a` 和 `x86_64` 两个 ABI。
+没有新增 Android Manifest 权限，未修改Cookie/profile隔离、DNS/ETP/WebRTC默认或用户私有存储路径。风险说明提醒风险，不改变法定责任或授权状态。**未进行Android真机安装或运行验证。**
+
+## 本地构建与离线回归
+
+需要 JDK 21、Gradle Wrapper 9.7.1、Android Gradle Plugin 9.4.0 和 Android SDK API 37；`minSdk 29`、`targetSdk 35`；输出 `arm64-v8a` 与 `x86_64` 两种 ABI。
 
 ```bash
+bash tools/run-crawler-local-mock.sh
 bash tools/run-geckoview-local-tests.sh
-./gradlew --no-daemon :app:lintRelease :app:assembleRelease
+./gradlew --offline --no-daemon :app:lintRelease :app:assembleRelease
 ```
 
-项目包含搜索目录、受控抓取、Profile、壁纸轮换、权限策略和网页调试的离线回归测试。关于应用自身特权检查的适用范围，见[特权守卫审计](docs/PRIVILEGE-GUARD-AUDIT.md)。
+离线回归不是Android设备或真实网站测试。请先阅读仓库顶层报告中明示的“0=取消应用配置上限”与系统/内存/网络剩余边界。

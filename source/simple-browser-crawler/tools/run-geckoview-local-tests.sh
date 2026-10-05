@@ -72,5 +72,6 @@ javac -encoding UTF-8 -d "$TMP/classes" \
     "$ROOT/app/src/main/java/com/cue/simplebrowser/MainActivity.java" \
     "$ROOT/app/src/main/java/com/cue/simplebrowser/GeckoViewBrowserAdapter.java"
   node "$ROOT/tools/test-web-console.js"
+  python3 "$ROOT/tools/privilege_guard_policy_smoke.py"
   python3 "$ROOT/tools/manual_permission_policy_smoke.py"
 } 2>&1 | tee "$RESULTS/geckoview-local-tests.log"

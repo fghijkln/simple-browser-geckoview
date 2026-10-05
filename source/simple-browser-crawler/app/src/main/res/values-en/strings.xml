@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Simple Browser</string>
+    <string name="crawler_title">Web crawler · secondary source</string>
+    <string name="crawler_intro">Defaults: 100 pages, 10,000 queued URLs, 30 minutes total, 16 MiB per page, a 1-second request interval, 3 same-origin redirect hops, and 512 KiB for robots.txt. All are configurable. Set page/queue/duration/body/redirect/robots bytes to 0 for Unlimited. The default application-added HTTP 429/503 wait is 30 seconds and can be set to 0; server Retry-After is still honored. Crawling is explicitly started by you, stays in the foreground, and sends requests serially. It does not crawl in the background, flood with concurrent requests, or create automatic retry storms. It parses only static HTML/plain text actually returned by the server, does not run JavaScript, and does not attach browser cookies, login state, or web sessions. Unlimited body/queue/robots responses may exhaust memory, trigger ANR, or crash the app.</string>
+    <string name="crawler_scope">robots.txt is respected by default; you can ask for each disallowed path or ignore it. Whether to follow cross-site destinations and how to handle ordinary non-success HTTP responses are user choices, with explicit prompts where needed. robots.txt is not authorization, and public readability does not mean site rules permit crawling, copying, or republication. For CAPTCHA, login, or paywall signals, you may display only static text actually returned by the server, or stop and open the page manually; the crawler will not submit forms, solve challenges, or bypass access controls. It does not use browser cookies/login state, so authenticated content cannot be fetched. Each 429/503 retry requires your individual confirmation. The application-added wait can be 0, but server Retry-After and your request interval are still honored. No proxy, IP rotation, fingerprint spoofing, or CAPTCHA solving is used.</string>
+    <string name="crawler_dns_note">Network boundary: this crawler uses Android Java HTTP(S) connections and system name resolution. It does not inherit GeckoView\'s Quad9 TRR-only setting and is not guaranteed to pass through the optional DNS-only VPN. Local/private addresses are rejected, but DNS preflight and connection behavior are platform-dependent; do not treat this as the browser\'s DNS privacy protection.</string>
+    <string name="crawler_url_hint">Enter a public HTTPS page URL (for example, https://example.org/)</string>
+    <string name="crawler_start">Start crawl</string>
+    <string name="crawler_cancel">Cancel crawl</string>
+    <string name="crawler_close">Close</string>
+    <string name="crawler_open_source">Open source page in browser</string>
+    <string name="crawler_source_label">Source URL</string>
+    <string name="crawler_empty">Results will appear here. Crawling will not automatically open or publish page content.</string>
+    <string name="crawler_checking_robots">Checking robots.txt…</string>
+    <string name="crawler_summary_label">Static page text summary</string>
+    <string name="crawler_limits_note">Risk: setting page count, queue, duration, per-page bytes, same-origin redirect hops, or robots.txt bytes to 0 removes that application-configured cap. Android/Java heap, array/string indexing, system allocation, network timeouts, and redirect-loop detection remain technical boundaries. Unlimited reads/crawls may exhaust memory, trigger ANR, or crash. Short delays, a 0 application-added 429/503 wait, or ignoring robots may generate substantial traffic, be rejected/blocked, or violate site rules. A warning appears before every run. This notice reminds you of risks; it does not change legal responsibility or authorization status.</string>
+    <string name="crawler_url_label">Starting URL</string>
+    <string name="crawler_page_limit_label">Page limit (0 = Unlimited; default 100)</string>
+    <string name="crawler_duration_label">Total duration in seconds (0 = no configured limit)</string>
+    <string name="crawler_page_bytes_label">Per-page body limit in MiB (0 = Unlimited; default 16)</string>
+    <string name="crawler_delay_label">Minimum request interval in milliseconds (0 = no extra delay; robots Crawl-delay still applies)</string>
+    <string name="crawler_robots_label">robots.txt policy</string>
+    <string name="crawler_robots_respect">Respect robots.txt (default)</string>
+    <string name="crawler_robots_ask">Ask for each disallowed path</string>
+    <string name="crawler_robots_ignore">Ignore robots.txt</string>
+    <string name="crawler_cross_site_toggle">Enable cross-site destinations; confirm each new site/cross-site redirect</string>
+    <string name="crawler_response_toggle">Ask whether to continue other pages after non-success HTTP responses</string>
+    <string name="crawler_start_warning_title">Crawler traffic and authorization notice</string>
+    <string name="crawler_start_warning">The crawler sends serial requests to the listed site and cross-site destinations you approve. Unlimited pages/queue/body/duration/same-origin redirects/robots.txt reads, short request intervals, a 0 application-added 429/503 wait, or ignoring robots.txt may create substantial traffic, be rejected or blocked, violate site terms, burden third parties, or exhaust Android/Java memory and trigger ANR/crash. Redirect-loop detection still stops repeated URIs; a 0 wait does not skip server Retry-After. Check authorization, site rules, privacy, and service impact. CAPTCHA/login/paywall controls are not bypassed; authenticated content cannot be fetched. Continuing applies your choices to this run only. This notice reminds you of risks; it does not change legal responsibility or authorization status.</string>
+    <string name="crawler_start_confirm">I have read this; start this crawl</string>
+    <string name="crawler_values_invalid">Check the entered values. Zero means no configured limit; valid ranges are shown in each label.</string>
+    <string name="crawler_value_invalid">%1$s: enter a non-negative whole number.</string>
+    <string name="crawler_settings_save_failed">Could not save settings; crawling was not started.</string>
+    <string name="privilege_disclaimer_title">Startup risk notice</string>
+    <string name="privilege_disclaimer_settings">Risk notice and disclaimer</string>
+    <string name="privilege_disclaimer_settings_summary">Privilege checks, debugging console, crawler, and compatibility</string>
+    <string name="privilege_continue">Continue</string>
+    <string name="privilege_exit">Exit</string>
+    <string name="privilege_findings_title">Privilege/environment findings for this launch (warnings only; they do not block startup):</string>
+    <string name="privilege_disclaimer_message">Simple Browser v0.6 relaxes some blocking policies from v0.5. Permission, AppOp, process-capability, and environment checks are still reported; non-fatal findings alone no longer block startup. Actual crashes or inability to initialize safely still fail normally.\n\nDeveloper debugging: USB/ADB DevTools is available by default. The in-app Console can show console argument values, error/rejection text, and stack/path from the active top-level page. Text may contain sensitive data, credentials, or personal information. Connect only trusted devices; turn features off in Settings. Row count, per-entry text/argument size, and event rate offer finite choices or Unlimited; unlimited logging may exhaust memory, trigger ANR, or crash. Data stays in memory and is erased when cleared/closed. No additional cookies, DOM, forms, request/response bodies, or wall-clock time are read; no general JavaScript bridge or native eval is added. Extension installation still explains its all-sites host permission.\n\nCrawler: page count, queue, total duration, per-page and robots.txt body bytes, same-origin redirect hops, request interval, robots policy, and application-added 429/503 wait are configurable; 0 means Unlimited where offered. Java/Android memory, array/string size, system allocation, and network timeouts remain technical boundaries. Unlimited operations may exhaust memory, trigger ANR/crash, cause substantial traffic, rejection/blocking, terms violations, or third-party load. Crawling is explicitly user-started, foreground, and serial. Every 429/503 retry needs confirmation and still honors server Retry-After. CAPTCHA/login/paywall responses may only be shown as actual static server text or opened manually; browser cookies/login state are not shared, so authenticated content cannot be fetched.\n\nCompatibility and rollback: existing v0.5 browser profile, history, bookmarks, and site permissions are retained; relaxed defaults apply in existing profiles and this notice is shown. Disable debugging/Console, adjust crawler options, or exit in Settings. Back up important data before rollback; Android generally does not allow downgrading over a newer install, and uninstalling deletes private app data.\n\nThis notice reminds you of risks; it does not change legal responsibility or authorization status.</string>
+    <string name="remote_debug_enabled">USB/ADB remote debugging is enabled</string>
+    <string name="remote_debug_disabled">USB/ADB remote debugging is disabled</string>
+    <string name="remote_debug_toggle">Firefox DevTools USB/ADB remote debugging</string>
+    <string name="remote_debug_disclosure">USB/ADB DevTools is enabled by default (GeckoView still controls endpoint creation through its API). A connected debugger may inspect and manipulate page content; connect only trusted devices. This does not enable Wi-Fi/LAN listening or add Android permissions. Turn it off in Settings.</string>
+    <string name="remote_debug_restart_note">GeckoView reads this setting when the Runtime is created. Changing it restarts the browser engine and restores open tab URLs; each tab\'s back/forward history resets. Closing the old Runtime also closes its debugging endpoint.</string>
+    <string name="in_app_console_toggle">In-page Console panel (enabled by default; can be disabled)</string>
+    <string name="in_app_console_enabled_summary">In-page Console is enabled; extension not installed</string>
+    <string name="in_app_console_disabled_summary">In-page Console is disabled</string>
+    <string name="in_app_console_disclosure">The bundled WebExtension is installed only when you open the current tab Console panel; installation clearly explains and asks for host permission to all HTTP/HTTPS sites. Capture is limited to the selected GeckoSession top-level page while the panel is open. It displays console.log/warn/error argument values and JavaScript error/rejection text plus stack/path; strings may contain credentials or personal information. Ordinary objects and DOM are not expanded. It does not additionally read cookies, forms, request/response bodies, page URLs, or wall-clock time. Row count, per-entry text/argument size, and events per second can be finite or Unlimited; unlimited choices may exhaust memory, trigger ANR, or crash. Data is memory-only, never persisted or uploaded. Pages can forge log entries.</string>
+    <string name="console_buffer_limit_button">Console memory row limit: %1$s</string>
+    <string name="console_buffer_limit_note">Choose 500, 1,000, 2,500, 5,000, or Unlimited. Changing the value clears current in-memory logs. Unlimited can exhaust memory, trigger ANR, or crash.</string>
+    <string name="console_buffer_limit_title">Choose the Console memory row limit</string>
+    <string name="console_buffer_limit_dialog_message">This setting controls rows retained in process memory. Unlimited may consume all available memory. Changing the value clears the current buffer.</string>
+    <string name="console_buffer_limit_save_failed">Could not save Console settings; the previous value was kept.</string>
+    <string name="console_buffer_limit_saved">Console settings updated; the current log buffer was cleared.</string>
+    <string name="in_app_console_restart_note">Opening or closing the panel restarts the Gecko Runtime; open tab URLs are restored, but back/forward history and temporary page state reset. When closed, capture stops, the buffer is cleared, GeckoSessions are closed, the extension is uninstalled, and the native message delegate is removed. The preference alone does not start debugging.</string>
+    <string name="in_app_console_open">Open current tab Console panel (install and restart)</string>
+    <string name="in_app_console_host_permission_title">Confirm debug extension installation</string>
+    <string name="in_app_console_host_permission_message">Continuing installs the bundled WebExtension and grants it host permission to all HTTP/HTTPS sites so it can read Console logs actively produced by the current top-level page. Log text may contain sensitive information. You can cancel or turn off Console later in Developer debugging.</string>
+    <string name="in_app_console_host_permission_accept">Confirm and install</string>
+    <string name="in_app_console_enable_first">Enable In-page Console in Developer debugging first.</string>
+    <string name="in_app_console_no_page">Open an HTTP(S) page before starting the Console panel.</string>
+    <string name="in_app_console_setup_failed">The debug extension is unavailable or could not be safely cleaned up; capture was not started. Check settings and try again.</string>
+    <string name="in_app_console_cleanup_failed">The in-page debug extension could not be fully uninstalled; the feature remains enabled but capture has stopped. Try turning it off again.</string>
+    <string name="in_app_console_save_failed">Could not save the in-page Console setting; state was not changed.</string>
+    <string name="in_app_console_restart_failed">Could not start a safe restart; retry. The debug setting was not changed.</string>
+    <string name="in_app_console_panel_title">Current tab JavaScript Console</string>
+    <string name="in_app_console_panel_notice">Only the selected tab top-level page. Displays page-provided log/error text and stack/path, which may be sensitive; the app does not capture URLs or wall-clock timestamps. Row count, per-entry text, and rate can be user-set to finite limits or Unlimited; unlimited use may exhaust memory, trigger ANR, or crash. Memory-only; clear/close to erase immediately. Page content can forge logs.</string>
+    <string name="in_app_console_clear">Clear</string>
+    <string name="in_app_console_entry_row">#%1$d · %2$s / %3$s · arguments %4$d — %5$s</string>
+    <string name="in_app_console_status">LIVE · selected tab top-level page · %1$d/%2$s entries · %3$d dropped by rate limit</string>
+    <string name="crawler_queue_limit_label">Queued URL limit (0 = Unlimited; default 10,000)</string>
+    <string name="crawler_rate_limit_wait_label">Application-added 429/503 wait in seconds (0 = no added wait; Retry-After still applies)</string>
+    <string name="crawler_response_only_note">Only static text actually returned by the server; it is not authenticated or bypassed and is not protected content. Authenticated page content cannot be fetched by this crawler.</string>
+    <string name="console_entry_limit_button">Console per-entry text/argument limit: %1$s</string>
+    <string name="console_entry_limit_note">Choose 16,384 characters, 65,536 characters, or Unlimited. There is no separate fixed argument-count cap; finite choices limit combined message and individual argument text. Unlimited removes the character caps; a huge log may exhaust memory or crash. Changing this setting clears current logs.</string>
+    <string name="console_entry_limit_title">Choose the Console per-entry limit</string>
+    <string name="console_entry_limit_dialog_message">This applies to the combined message and each individual argument. There is no separate fixed argument-count cap. Unlimited removes character caps; Java strings and available memory remain technical limits.</string>
+    <string name="console_entry_limit_choice">%1$d characters</string>
+    <string name="console_rate_limit_button">Console events-per-second limit: %1$s</string>
+    <string name="console_rate_limit_note">Choose 15, 60, 120, or Unlimited events per second. Unlimited may increase CPU and memory pressure. Changing this setting clears current logs.</string>
+    <string name="console_rate_limit_title">Choose the Console event-rate limit</string>
+    <string name="console_rate_limit_dialog_message">This limits events received by the in-memory buffer. Unlimited may increase CPU and memory use.</string>
+    <string name="console_rate_limit_choice">%1$d per second</string>
+    <string name="console_unlimited_label">Unlimited</string>
+    <string name="console_unlimited_risk_title">Unlimited logging risk</string>
+    <string name="console_unlimited_risk_message">Unlimited Console logging may exhaust memory, make the app unresponsive (ANR), or crash it. Continue with this setting?</string>
+    <string name="console_unlimited_risk_confirm">Use Unlimited</string>
+    <string name="console_unlimited_risk_cancel">Keep previous setting</string>
+    <string name="crawler_redirect_limit_label">Same-origin redirect hops (0 = Unlimited; default 3; loops still stop)</string>
+    <string name="crawler_robots_bytes_label">robots.txt body limit in KiB (0 = Unlimited; default 512)</string>
+</resources>

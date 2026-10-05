@@ -1,0 +1,43 @@
+Simple Browser v0.6 / app 2.9.0 (versionCode 19) — merged Manifest and APK audit
+
+Source baseline: public v0.5 tag, commit 26a28a72d10a7907e8a995c8f2cf03568765af5d.
+No GitHub branch, tag, release, or asset was created.
+APKs inspected after the final rebuild: arm64-v8a and x86_64.
+
+1. Package metadata
+- Package: com.cue.simplebrowser
+- Version: 2.9.0 / versionCode 19
+- minSdk 29 / targetSdk 35 / compileSdk 37
+- arm64-v8a APK contains native libraries only for arm64-v8a.
+- x86_64 APK contains native libraries only for x86_64.
+
+2. Merged Manifest requested permissions
+Both Release ABI merged Manifests contain the same 11 permissions. `aapt dump permissions` compared to the v0.5 2.8.1 arm64 reference APK produced an empty diff for each ABI:
+- android.permission.ACCESS_COARSE_LOCATION
+- android.permission.ACCESS_FINE_LOCATION
+- android.permission.ACCESS_NETWORK_STATE
+- android.permission.CAMERA
+- android.permission.FOREGROUND_SERVICE
+- android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED
+- android.permission.INTERNET
+- android.permission.MODIFY_AUDIO_SETTINGS
+- android.permission.RECORD_AUDIO
+- android.permission.WAKE_LOCK
+- com.cue.simplebrowser.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+
+No Android permission was added. CAMERA, RECORD_AUDIO, ACCESS_COARSE_LOCATION, and ACCESS_FINE_LOCATION already existed in the v0.5 Manifest/guard allowlist. No broad media, contacts, storage, SMS, phone, or other sensor permissions were added.
+
+3. Merged Manifest features and release flags
+- Camera, camera.any, autofocus, microphone, location, and GPS features have `android:required="false"` in both ABI merged Manifests. Audio low-latency and touchscreen features are also optional.
+- The Release `<application>` has no explicit `android:debuggable` attribute; Android defaults to false. `aapt dump badging` does not report application-debuggable.
+- No Wi-Fi/LAN debugger listener or new persistent service was introduced by these changes.
+
+4. Signer and APK integrity
+- Both APKs verify with APK Signature Scheme v3.
+- Signer certificate SHA-256: e82931a4c130f749fe03fa6f6b530007d03a7b00f003aea47cdc3d0f69e28dfd.
+- This matches the available v0.5 2.8.1 reference APK's certificate (Android Debug certificate, not a production app-store signing key).
+- `unzip -tq` passed for both APKs.
+- `zipalign -c -P 16 -v 4` passed for both APKs.
+- Final sizes: arm64-v8a 218,827,115 bytes; x86_64 238,190,468 bytes.
+
+This is a static/build-time audit only. No device installation, runtime permission prompt, or DevTools endpoint test was performed.

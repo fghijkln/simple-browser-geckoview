@@ -1,18 +1,23 @@
-# Simple Browser Android source project (v0.5 / 2.8.1)
+# Simple Browser Android source project (local v0.6 candidate / 2.9.0)
 
-This directory contains the complete Android Gradle project for public release **v0.5** (application version **2.8.1 / versionCode 18**). The repository's [bilingual overview](../../README.md) has downloads, feature summaries, and verification limits; [bilingual release notes](../../RELEASE-NOTES-v0.5.md) describe the wallpaper and web-debugging changes.
+This Android Gradle project is a modified copy based on public v0.5 commit `26a28a72d10a7907e8a995c8f2cf03568765af5d`. **v0.6/2.9.0 is a local candidate only and has not been published remotely; APKs use the Android Debug certificate, not a production app-store key.** Scope, compatibility, remaining technical boundaries, regression/build/Manifest audit, and device-test limits are documented in the repository-root [Chinese report](../../REPORT.md), [Simplified Chinese release notes](../../RELEASE-NOTES-v0.6-zh-CN.md), [English release notes](../../RELEASE-NOTES-v0.6-en.md), and [Manifest audit](../../MANIFEST-AUDIT-v0.6.txt).
 
-The new-tab page contains seven bundled offline wallpapers and forces one image per device-local calendar date; there is no manual switch. USB/ADB Firefox DevTools and the in-app Console/Errors panel in Developer settings are both off by default. The Console extension is installed only after the user explicitly opens the panel, which requires accepting host permission for every HTTP/HTTPS site. The panel keeps restricted metadata in memory only, never log text or page URLs. Closing clears memory, uninstalls the extension, and restarts the Runtime. See the [English web-debugging guide](docs/WEB-DEBUGGING.en.md), [中文说明](docs/WEB-DEBUGGING.md), and [web-debug API audit](evidence/GECKOVIEW-WEB-DEBUG-API-AUDIT.md) for details and limitations.
+## v0.6 candidate changes
 
-The Android Manifest and app-local privilege guard retain their reviewed v0.4 implementation; daily rotation and web debugging add no Android permissions. Release APKs use the project's retained Android Debug signing certificate, not a production app-store key. Offline builds and static checks are not device tests; real debugging connectivity and wallpaper rendering were not device-verified. See the repository-root [build report](../../BUILD-REPORT.md) for the full test record.
+A bilingual risk notice appears at startup, lists app-privilege findings, and requires Continue or Exit. Non-fatal guard findings no longer independently block startup; fatal corruption still fails. USB/ADB DevTools and the in-app Console default to available and remain switchable in Settings. Console installation still requests all-sites host permission; top-level page logs/errors/stacks may contain sensitive content. Console row count, per-entry text/argument size, and event rate each offer finite choices or Unlimited; Unlimited remains subject to Android/Java heap and data-type limits.
 
-## Build locally
+Web camera, microphone, and location requests can invoke Android runtime permission prompts, followed by the existing per-site decision. Crawling remains explicitly user-started, foreground, and serial, with finite values or `0 = Unlimited` for page count, queue, total duration, per-page/robots bytes, same-origin redirects, request gap, and 429/503 wait. Actual infinite memory is not guaranteed; every 429/503 retry requires confirmation and honors server `Retry-After`. Authentication/CAPTCHA/paywalls are not bypassed, and the crawler does not share browser login state.
 
-Requires JDK 21, Gradle Wrapper 9.7.1, Android Gradle Plugin 9.4.0, and Android SDK API 37 (minor 2). The app uses `minSdk 29` and `targetSdk 35` and builds only ABI-specific `arm64-v8a` and `x86_64` APKs.
+No Android Manifest permission was added. Cookie/profile isolation, DNS/ETP/WebRTC defaults, and the user-private storage path were not changed. The notice reminds users of risks; it does not change legal responsibility or authorization status. **No Android device installation/runtime test has been performed.**
+
+## Local build and offline regressions
+
+Requires JDK 21, Gradle Wrapper 9.7.1, Android Gradle Plugin 9.4.0, and Android SDK API 37. The app uses `minSdk 29`, `targetSdk 35` and builds ABI-specific `arm64-v8a` and `x86_64` APKs.
 
 ```bash
+bash tools/run-crawler-local-mock.sh
 bash tools/run-geckoview-local-tests.sh
-./gradlew --no-daemon :app:lintRelease :app:assembleRelease
+./gradlew --offline --no-daemon :app:lintRelease :app:assembleRelease
 ```
 
-Offline regression coverage includes the search catalogue, controlled crawler, profiles, wallpaper rotation, permission policy, and web debugging. See the [privilege-guard audit](docs/PRIVILEGE-GUARD-AUDIT.md) for the app-local checks' scope.
+Offline tests are not Android-device or real-site tests. Read the repository-root report for the precise meaning of “0 removes an app-configured cap” and the remaining system, memory, and network boundaries.

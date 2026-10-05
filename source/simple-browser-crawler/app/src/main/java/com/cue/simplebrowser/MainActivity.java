@@ -62,6 +62,7 @@ import org.mozilla.geckoview.WebResponse;
 
 import java.util.Collections;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
@@ -99,15 +100,18 @@ public final class MainActivity extends Activity {
     private static final String STATE_TAB_TITLE_PREFIX = "simple-browser.tabs.title.";
     private static final String STATE_TAB_HOME_PREFIX = "simple-browser.tabs.home.";
     private static final String STATE_CONSOLE_PANEL_OPEN = "simple-browser.console.panel.open";
+    private static final String STATE_STARTUP_DISCLOSURE_ACCEPTED = "simple-browser.disclosure.accepted";
     private static final String SEARCH_PREFERENCES = "simple-browser.preferences";
     private static final String SEARCH_ENGINE_PREFERENCE = "search-engine";
     private static final String HISTORY_PREFERENCE = "browser-history-v1";
     private static final String BOOKMARKS_PREFERENCE = "browser-bookmarks-v1";
     private static final String SITE_MODE_PREFERENCE = SiteMode.PREFERENCE_KEY;
     private static final String CUSTOM_ENGINES_PREFERENCE = "custom-search-engines";
+    private static final String CONSOLE_HOST_PERMISSION_NOTICE_ACCEPTED = "developer_console_host_notice_v1";
     private static final String PROFILE_PREFERENCES_PREFIX = "browser.profile.";
     private static final int REQUEST_IMPORT_EXTENSION_ZIP = 7401;
     private static final int REQUEST_DNS_VPN_CONSENT = 7403;
+    private static final int REQUEST_BROWSER_RUNTIME_PERMISSIONS = 7404;
     private static final String USER_EXTENSION_PREFIX = "extension.mv3.";
     private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*:");
     private static final Pattern HOST_AND_PORT = Pattern.compile("^[^\\s/:]+:[0-9]{1,5}(/.*)?$");
@@ -135,6 +139,23 @@ public final class MainActivity extends Activity {
     private ControlledCrawlerDialog controlledCrawlerUi;
     private Dialog profileManagerDialog;
     private boolean activityResumed;
+    private boolean startupDisclosureAccepted;
+    private boolean browserUiInitialized;
+    private final ArrayDeque<RuntimePermissionRequest> runtimePermissionQueue = new ArrayDeque<>();
+    private RuntimePermissionRequest activeRuntimePermissionRequest;
+    private static final class RuntimePermissionRequest {
+        final String[] permissions;
+        final String permissionLabel;
+        final String origin;
+        final Consumer<Boolean> decision;
+        RuntimePermissionRequest(String[] permissions, String permissionLabel, String origin,
+                                Consumer<Boolean> decision) {
+            this.permissions = permissions;
+            this.permissionLabel = permissionLabel;
+            this.origin = origin;
+            this.decision = decision;
+        }
+    }
     private LinearLayout extensionManagerCards;
     private LinearLayout tabItems;
     private HorizontalScrollView tabScroll;
@@ -203,7 +224,7 @@ public final class MainActivity extends Activity {
     private BrowserProfileStore.Profile currentBrowserProfile;
     private android.content.SharedPreferences profilePreferences;
     private boolean profileMetadataRecovered;
-    private final WebConsoleBuffer webConsoleBuffer = new WebConsoleBuffer();
+    private WebConsoleBuffer webConsoleBuffer = new WebConsoleBuffer();
     private boolean consolePanelOpen;
     private boolean pendingConsolePanelOpen;
     private boolean consolePanelCloseRestartInProgress;
@@ -233,6 +254,46 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (savedInstanceState == null
+                || !savedInstanceState.getBoolean(STATE_STARTUP_DISCLOSURE_ACCEPTED, false)) {
+            showPolicyDisclosure(true, savedInstanceState);
+            return;
+        }
+        startupDisclosureAccepted = true;
+        initializeBrowserUi(savedInstanceState);
+    }
+
+    private void showPolicyDisclosure(boolean startup, Bundle restoreState) {
+        StringBuilder message = new StringBuilder(getString(R.string.privilege_disclaimer_message));
+        List<String> findings = ((PrivilegeGuardApplication) getApplication()).getPrivilegeFindings();
+        if (findings != null && !findings.isEmpty()) {
+            message.append("\n\n").append(getString(R.string.privilege_findings_title));
+            for (String finding : findings) message.append("\n• ").append(finding);
+        }
+        android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.privilege_disclaimer_title)
+                .setMessage(message.toString())
+                .setCancelable(!startup);
+        if (startup) {
+            builder.setPositiveButton(R.string.privilege_continue, (dialog, which) -> {
+                startupDisclosureAccepted = true;
+                initializeBrowserUi(restoreState);
+            }).setNegativeButton(R.string.privilege_exit, (dialog, which) -> {
+                setResult(RESULT_CANCELED);
+                finishAndRemoveTask();
+            });
+        } else {
+            builder.setPositiveButton(R.string.close, null);
+        }
+        android.app.AlertDialog disclosure = builder.create();
+        if (startup) disclosure.setCanceledOnTouchOutside(false);
+        disclosure.show();
+    }
+
+    @android.annotation.SuppressLint("ApplySharedPref")
+    private void initializeBrowserUi(Bundle savedInstanceState) {
+        if (browserUiInitialized || isFinishing()) return;
+        browserUiInitialized = true;
         tabRegistry = new BrowserTabRegistry();
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(BACKGROUND);
@@ -243,6 +304,13 @@ public final class MainActivity extends Activity {
         insetsController.setAppearanceLightNavigationBars(true);
 
         android.content.SharedPreferences preferences = getSharedPreferences(SEARCH_PREFERENCES, MODE_PRIVATE);
+        int consoleCapacity = WebDebugPolicy.normalizeConsoleCapacity(preferences.getInt(
+                WebDebugPolicy.CONSOLE_BUFFER_CAPACITY_PREFERENCE, WebDebugPolicy.CONSOLE_RING_CAPACITY));
+        int consoleRateLimit = WebDebugPolicy.normalizeConsoleRateLimit(preferences.getInt(
+                WebDebugPolicy.CONSOLE_RATE_LIMIT_PREFERENCE,
+                WebDebugPolicy.CONSOLE_MAX_EVENTS_PER_SECOND));
+        webConsoleBuffer = new WebConsoleBuffer(consoleCapacity,
+                consoleRateLimit);
         pendingConsolePanelOpen = ((savedInstanceState != null
                 && savedInstanceState.getBoolean(STATE_CONSOLE_PANEL_OPEN, false))
                 || preferences.getBoolean(WebDebugPolicy.IN_APP_CONSOLE_PANEL_REQUEST_PREFERENCE, false))
@@ -1176,6 +1244,9 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         subtitleParams.topMargin = dp(4);
         sheet.addView(subtitle, subtitleParams);
+        addSettingsRow(sheet, "!", getString(R.string.privilege_disclaimer_settings),
+                getString(R.string.privilege_disclaimer_settings_summary),
+                () -> showPolicyDisclosure(false, null));
         TextView wallpaperDisclosure = label(getString(R.string.wallpaper_daily_rotation_disclosure),
                 10, SECONDARY, false);
         wallpaperDisclosure.setLineSpacing(dp(2), 1f);
@@ -1343,6 +1414,58 @@ public final class MainActivity extends Activity {
         consoleRestartNote.setLineSpacing(dp(2), 1f);
         sheet.addView(consoleRestartNote);
 
+        int currentConsoleCapacity = WebDebugPolicy.normalizeConsoleCapacity(preferences.getInt(
+                WebDebugPolicy.CONSOLE_BUFFER_CAPACITY_PREFERENCE, WebDebugPolicy.CONSOLE_RING_CAPACITY));
+        TextView consoleBufferLimit = label(getString(R.string.console_buffer_limit_button,
+                consoleLimitLabel(currentConsoleCapacity)), 13, ACCENT, true);
+        consoleBufferLimit.setPadding(dp(12), dp(10), dp(12), dp(10));
+        consoleBufferLimit.setBackground(rounded(Color.rgb(239, 243, 255), dp(14), BORDER));
+        consoleBufferLimit.setOnClickListener(view ->
+                showConsoleBufferLimitDialog(consoleBufferLimit, preferences));
+        LinearLayout.LayoutParams consoleBufferLimitParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        consoleBufferLimitParams.topMargin = dp(8);
+        sheet.addView(consoleBufferLimit, consoleBufferLimitParams);
+        TextView consoleBufferLimitNote = label(getString(R.string.console_buffer_limit_note), 10,
+                SECONDARY, false);
+        consoleBufferLimitNote.setLineSpacing(dp(2), 1f);
+        sheet.addView(consoleBufferLimitNote);
+
+        int currentConsoleEntryLimit = WebDebugPolicy.normalizeConsoleEntryLimit(preferences.getInt(
+                WebDebugPolicy.CONSOLE_ENTRY_LIMIT_PREFERENCE, WebDebugPolicy.CONSOLE_MAX_ENTRY_CHARS));
+        TextView consoleEntryLimit = label(getString(R.string.console_entry_limit_button,
+                consoleLimitLabel(currentConsoleEntryLimit)), 13, ACCENT, true);
+        consoleEntryLimit.setPadding(dp(12), dp(10), dp(12), dp(10));
+        consoleEntryLimit.setBackground(rounded(Color.rgb(239, 243, 255), dp(14), BORDER));
+        consoleEntryLimit.setOnClickListener(view ->
+                showConsoleEntryLimitDialog(consoleEntryLimit, preferences));
+        LinearLayout.LayoutParams consoleEntryLimitParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        consoleEntryLimitParams.topMargin = dp(8);
+        sheet.addView(consoleEntryLimit, consoleEntryLimitParams);
+        TextView consoleEntryLimitNote = label(getString(R.string.console_entry_limit_note), 10,
+                SECONDARY, false);
+        consoleEntryLimitNote.setLineSpacing(dp(2), 1f);
+        sheet.addView(consoleEntryLimitNote);
+
+        int currentConsoleRateLimit = WebDebugPolicy.normalizeConsoleRateLimit(preferences.getInt(
+                WebDebugPolicy.CONSOLE_RATE_LIMIT_PREFERENCE,
+                WebDebugPolicy.CONSOLE_MAX_EVENTS_PER_SECOND));
+        TextView consoleRateLimit = label(getString(R.string.console_rate_limit_button,
+                consoleLimitLabel(currentConsoleRateLimit)), 13, ACCENT, true);
+        consoleRateLimit.setPadding(dp(12), dp(10), dp(12), dp(10));
+        consoleRateLimit.setBackground(rounded(Color.rgb(239, 243, 255), dp(14), BORDER));
+        consoleRateLimit.setOnClickListener(view ->
+                showConsoleRateLimitDialog(consoleRateLimit, preferences));
+        LinearLayout.LayoutParams consoleRateLimitParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        consoleRateLimitParams.topMargin = dp(8);
+        sheet.addView(consoleRateLimit, consoleRateLimitParams);
+        TextView consoleRateLimitNote = label(getString(R.string.console_rate_limit_note), 10,
+                SECONDARY, false);
+        consoleRateLimitNote.setLineSpacing(dp(2), 1f);
+        sheet.addView(consoleRateLimitNote);
+
         TextView openConsole = label(getString(R.string.in_app_console_open), 14, ACCENT, true);
         openConsole.setGravity(Gravity.CENTER);
         openConsole.setPadding(dp(12), dp(10), dp(12), dp(10));
@@ -1372,6 +1495,144 @@ public final class MainActivity extends Activity {
         content.addView(sheet, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         showBottomDialog(dialog, content, dp(300), dp(620));
+    }
+
+    private void showConsoleBufferLimitDialog(TextView button,
+            android.content.SharedPreferences preferences) {
+        int[] capacities = WebDebugPolicy.consoleCapacityOptions();
+        int current = WebDebugPolicy.normalizeConsoleCapacity(preferences.getInt(
+                WebDebugPolicy.CONSOLE_BUFFER_CAPACITY_PREFERENCE, WebDebugPolicy.CONSOLE_RING_CAPACITY));
+        String[] labels = new String[capacities.length];
+        for (int index = 0; index < capacities.length; index++) {
+            labels[index] = consoleLimitLabel(capacities[index]);
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.console_buffer_limit_title)
+                .setMessage(R.string.console_buffer_limit_dialog_message)
+                .setSingleChoiceItems(labels, WebDebugPolicy.consoleCapacityOptionIndex(current),
+                        (dialog, which) -> {
+                            if (which < 0 || which >= capacities.length) { dialog.dismiss(); return; }
+                            int selected = capacities[which];
+                            if (selected == current) { dialog.dismiss(); return; }
+                            dialog.dismiss();
+                            Runnable save = () -> {
+                                if (!preferences.edit().putInt(WebDebugPolicy.CONSOLE_BUFFER_CAPACITY_PREFERENCE,
+                                        selected).commit()) {
+                                    Toast.makeText(this, R.string.console_buffer_limit_save_failed,
+                                            Toast.LENGTH_LONG).show();
+                                    return;
+                                }
+                                button.setText(getString(R.string.console_buffer_limit_button,
+                                        consoleLimitLabel(selected)));
+                                resetConsoleBufferFromPreferences(preferences);
+                                Toast.makeText(this, R.string.console_buffer_limit_saved,
+                                        Toast.LENGTH_SHORT).show();
+                            };
+                            if (selected == 0) showConsoleUnlimitedConfirmation(save); else save.run();
+                        })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void showConsoleEntryLimitDialog(TextView button,
+            android.content.SharedPreferences preferences) {
+        int[] options = WebDebugPolicy.consoleEntryLimitOptions();
+        int current = WebDebugPolicy.normalizeConsoleEntryLimit(preferences.getInt(
+                WebDebugPolicy.CONSOLE_ENTRY_LIMIT_PREFERENCE, WebDebugPolicy.CONSOLE_MAX_ENTRY_CHARS));
+        String[] labels = new String[options.length];
+        for (int index = 0; index < options.length; index++) {
+            labels[index] = options[index] == 0 ? getString(R.string.console_unlimited_label)
+                    : getString(R.string.console_entry_limit_choice, options[index]);
+        }
+        new android.app.AlertDialog.Builder(this).setTitle(R.string.console_entry_limit_title)
+                .setMessage(R.string.console_entry_limit_dialog_message)
+                .setSingleChoiceItems(labels, WebDebugPolicy.consoleEntryLimitOptionIndex(current),
+                        (dialog, which) -> {
+                            if (which < 0 || which >= options.length) { dialog.dismiss(); return; }
+                            int selected = options[which];
+                            if (selected == current) { dialog.dismiss(); return; }
+                            dialog.dismiss();
+                            Runnable save = () -> {
+                                if (!preferences.edit().putInt(WebDebugPolicy.CONSOLE_ENTRY_LIMIT_PREFERENCE,
+                                        selected).commit()) {
+                                    Toast.makeText(this, R.string.console_buffer_limit_save_failed,
+                                            Toast.LENGTH_LONG).show();
+                                    return;
+                                }
+                                button.setText(getString(R.string.console_entry_limit_button,
+                                        consoleLimitLabel(selected)));
+                                resetConsoleBufferFromPreferences(preferences);
+                                Toast.makeText(this, R.string.console_buffer_limit_saved,
+                                        Toast.LENGTH_SHORT).show();
+                            };
+                            if (selected == 0) showConsoleUnlimitedConfirmation(save); else save.run();
+                        })
+                .setNegativeButton(R.string.cancel, null).show();
+    }
+
+    private void showConsoleRateLimitDialog(TextView button,
+            android.content.SharedPreferences preferences) {
+        int[] options = WebDebugPolicy.consoleRateLimitOptions();
+        int current = WebDebugPolicy.normalizeConsoleRateLimit(preferences.getInt(
+                WebDebugPolicy.CONSOLE_RATE_LIMIT_PREFERENCE,
+                WebDebugPolicy.CONSOLE_MAX_EVENTS_PER_SECOND));
+        String[] labels = new String[options.length];
+        for (int index = 0; index < options.length; index++) {
+            labels[index] = options[index] == 0 ? getString(R.string.console_unlimited_label)
+                    : getString(R.string.console_rate_limit_choice, options[index]);
+        }
+        new android.app.AlertDialog.Builder(this).setTitle(R.string.console_rate_limit_title)
+                .setMessage(R.string.console_rate_limit_dialog_message)
+                .setSingleChoiceItems(labels, WebDebugPolicy.consoleRateLimitOptionIndex(current),
+                        (dialog, which) -> {
+                            if (which < 0 || which >= options.length) { dialog.dismiss(); return; }
+                            int selected = options[which];
+                            if (selected == current) { dialog.dismiss(); return; }
+                            dialog.dismiss();
+                            Runnable save = () -> {
+                                if (!preferences.edit().putInt(WebDebugPolicy.CONSOLE_RATE_LIMIT_PREFERENCE,
+                                        selected).commit()) {
+                                    Toast.makeText(this, R.string.console_buffer_limit_save_failed,
+                                            Toast.LENGTH_LONG).show();
+                                    return;
+                                }
+                                button.setText(getString(R.string.console_rate_limit_button,
+                                        consoleLimitLabel(selected)));
+                                resetConsoleBufferFromPreferences(preferences);
+                                Toast.makeText(this, R.string.console_buffer_limit_saved,
+                                        Toast.LENGTH_SHORT).show();
+                            };
+                            if (selected == 0) showConsoleUnlimitedConfirmation(save); else save.run();
+                        })
+                .setNegativeButton(R.string.cancel, null).show();
+    }
+
+    private String consoleLimitLabel(int value) {
+        return value == 0 ? getString(R.string.console_unlimited_label) : Integer.toString(value);
+    }
+
+    private void showConsoleUnlimitedConfirmation(Runnable confirmed) {
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.console_unlimited_risk_title)
+                .setMessage(R.string.console_unlimited_risk_message)
+                .setPositiveButton(R.string.console_unlimited_risk_confirm,
+                        (dialog, which) -> confirmed.run())
+                .setNegativeButton(R.string.console_unlimited_risk_cancel, null)
+                .show();
+    }
+
+    private void resetConsoleBufferFromPreferences(
+            android.content.SharedPreferences preferences) {
+        int capacity = WebDebugPolicy.normalizeConsoleCapacity(preferences.getInt(
+                WebDebugPolicy.CONSOLE_BUFFER_CAPACITY_PREFERENCE,
+                WebDebugPolicy.CONSOLE_RING_CAPACITY));
+        int rate = WebDebugPolicy.normalizeConsoleRateLimit(preferences.getInt(
+                WebDebugPolicy.CONSOLE_RATE_LIMIT_PREFERENCE,
+                WebDebugPolicy.CONSOLE_MAX_EVENTS_PER_SECOND));
+        webConsoleBuffer.clear();
+        webConsoleBuffer = new WebConsoleBuffer(capacity, rate);
+        updateConsoleCaptureForSessions();
+        refreshConsolePanel();
     }
 
     private void showInAppConsolePanel() {
@@ -1437,7 +1698,7 @@ public final class MainActivity extends Activity {
         panel.addView(disclosure, disclosureParams);
 
         consolePanelStatus = label(getString(R.string.in_app_console_status, 0,
-                WebDebugPolicy.CONSOLE_RING_CAPACITY, 0L), 10, SECONDARY, false);
+                consoleLimitLabel(webConsoleBuffer.capacity()), 0L), 10, SECONDARY, false);
         panel.addView(consolePanelStatus);
 
         consoleEntryList = new ListView(this);
@@ -1465,7 +1726,7 @@ public final class MainActivity extends Activity {
                 } else {
                     row.setText(getString(R.string.in_app_console_entry_row,
                             entry.sequence, entry.categoryLabel(), entry.levelLabel(),
-                            entry.argumentCount));
+                            entry.argumentCount, entry.content));
                     if (entry.level == WebConsoleEntry.Level.ERROR) row.setTextColor(Color.rgb(174, 45, 45));
                     else if (entry.level == WebConsoleEntry.Level.WARN) row.setTextColor(Color.rgb(153, 96, 16));
                 }
@@ -1485,7 +1746,7 @@ public final class MainActivity extends Activity {
     private void refreshConsolePanel() {
         if (consolePanelStatus != null) {
             consolePanelStatus.setText(getString(R.string.in_app_console_status,
-                    webConsoleBuffer.size(), WebDebugPolicy.CONSOLE_RING_CAPACITY,
+                    webConsoleBuffer.size(), consoleLimitLabel(webConsoleBuffer.capacity()),
                     webConsoleBuffer.droppedByRateLimit()));
         }
         if (consoleEntryAdapter != null) {
@@ -1561,6 +1822,23 @@ public final class MainActivity extends Activity {
                 || !isWebUrlString(currentSession.browser.getUrl())) {
             Toast.makeText(this, R.string.in_app_console_no_page, Toast.LENGTH_LONG).show();
             return false;
+        }
+        if (!preferences.getBoolean(CONSOLE_HOST_PERMISSION_NOTICE_ACCEPTED, false)) {
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.in_app_console_host_permission_title)
+                    .setMessage(R.string.in_app_console_host_permission_message)
+                    .setPositiveButton(R.string.in_app_console_host_permission_accept, (dialog, which) -> {
+                        if (!preferences.edit().putBoolean(CONSOLE_HOST_PERMISSION_NOTICE_ACCEPTED,
+                                true).commit()) {
+                            Toast.makeText(this, R.string.in_app_console_save_failed,
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        requestConsolePanelOpen();
+                    })
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
+            return true;
         }
         if (GeckoViewBrowserAdapter.isConsoleExtensionReady()) {
             if (developerDebugDialog != null && developerDebugDialog.isShowing()) {
@@ -2052,7 +2330,7 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     Toast.makeText(MainActivity.this,
-                            getString(R.string.browser_permission_missing_system, origin, permissionLabel),
+                            getString(R.string.browser_permission_system_denied, origin, permissionLabel),
                             Toast.LENGTH_LONG).show();
                 });
             }
@@ -2071,6 +2349,12 @@ public final class MainActivity extends Activity {
             public void requestSitePermission(String permissionLabel, String origin,
                                               Consumer<Boolean> decision) {
                 requestBrowserSitePermission(permissionLabel, origin, decision);
+            }
+
+            @Override
+            public void requestSystemPermissions(String[] permissions, String permissionLabel,
+                                                 String origin, Consumer<Boolean> decision) {
+                requestBrowserSystemPermissions(permissions, permissionLabel, origin, decision);
             }
         });
         browser.setLoadHandler(new GeckoViewBrowserAdapter.LoadHandler() {
@@ -2194,6 +2478,96 @@ public final class MainActivity extends Activity {
                     .setOnCancelListener(dialog -> respondOnce.accept(false))
                     .show();
         });
+    }
+
+    private void requestBrowserSystemPermissions(String[] permissions, String permissionLabel,
+                                                 String origin, Consumer<Boolean> decision) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() || permissions == null || permissions.length == 0) {
+                decision.accept(false);
+                return;
+            }
+            Set<String> allowlist = new java.util.HashSet<>(java.util.Arrays.asList(
+                    android.Manifest.permission.CAMERA,
+                    android.Manifest.permission.RECORD_AUDIO,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                    android.Manifest.permission.ACCESS_FINE_LOCATION));
+            ArrayList<String> missing = new ArrayList<>();
+            for (String permission : permissions) {
+                if (!allowlist.contains(permission)) {
+                    decision.accept(false);
+                    return;
+                }
+                if (checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    if (!missing.contains(permission)) missing.add(permission);
+                }
+            }
+            if (missing.isEmpty()) {
+                decision.accept(true);
+                return;
+            }
+            runtimePermissionQueue.addLast(new RuntimePermissionRequest(
+                    missing.toArray(new String[0]), permissionLabel, origin, decision));
+            showNextRuntimePermissionRequest();
+        });
+    }
+
+    private void showNextRuntimePermissionRequest() {
+        if (activeRuntimePermissionRequest != null || isFinishing() || runtimePermissionQueue.isEmpty()) return;
+        activeRuntimePermissionRequest = runtimePermissionQueue.removeFirst();
+        RuntimePermissionRequest request = activeRuntimePermissionRequest;
+        android.app.AlertDialog rationale = new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.browser_system_permission_title)
+                .setMessage(getString(R.string.browser_system_permission_rationale,
+                        request.origin, request.permissionLabel))
+                .setPositiveButton(R.string.browser_system_permission_continue, (dialog, which) -> {
+                    if (activeRuntimePermissionRequest != request) return;
+                    try {
+                        requestPermissions(request.permissions, REQUEST_BROWSER_RUNTIME_PERMISSIONS);
+                    } catch (RuntimeException error) {
+                        finishRuntimePermissionRequest(false);
+                    }
+                })
+                .setNegativeButton(R.string.cancel, (dialog, which) -> finishRuntimePermissionRequest(false))
+                .setOnCancelListener(dialog -> finishRuntimePermissionRequest(false))
+                .create();
+        rationale.show();
+    }
+
+    private void finishRuntimePermissionRequest(boolean systemGranted) {
+        RuntimePermissionRequest request = activeRuntimePermissionRequest;
+        if (request == null) return;
+        activeRuntimePermissionRequest = null;
+        boolean granted = systemGranted;
+        boolean asksLocationPair = request.permissions.length > 1
+                && containsPermission(request.permissions, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                && containsPermission(request.permissions, android.Manifest.permission.ACCESS_FINE_LOCATION);
+        if (asksLocationPair) {
+            granted = systemGranted && (checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    || checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED);
+        } else {
+            for (String permission : request.permissions) {
+                if (checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    granted = false;
+                }
+            }
+        }
+        request.decision.accept(granted);
+        searchEngineIconHandler.post(this::showNextRuntimePermissionRequest);
+    }
+
+    private static boolean containsPermission(String[] permissions, String expected) {
+        for (String permission : permissions) if (expected.equals(permission)) return true;
+        return false;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_BROWSER_RUNTIME_PERMISSIONS) return;
+        finishRuntimePermissionRequest(true);
     }
 
     private void handleGeckoDownload(BrowserTabSession session, WebResponse response) {
@@ -3657,6 +4031,11 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
+        outState.putBoolean(STATE_STARTUP_DISCLOSURE_ACCEPTED, startupDisclosureAccepted);
+        if (!browserUiInitialized || tabRegistry == null) {
+            super.onSaveInstanceState(outState);
+            return;
+        }
         List<BrowserTabRegistry.Tab> openTabs = tabRegistry.all();
         String[] ids = new String[openTabs.size()];
         for (int i = 0; i < openTabs.size(); i++) {

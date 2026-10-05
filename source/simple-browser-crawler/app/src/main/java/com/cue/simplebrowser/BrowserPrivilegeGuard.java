@@ -29,6 +29,7 @@ import java.io.InputStreamReader;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -76,35 +77,48 @@ final class BrowserPrivilegeGuard {
 
     private BrowserPrivilegeGuard() {}
 
-    static void verifyOrThrow(Context suppliedContext) {
-        if (suppliedContext == null) throw blocked("application context is unavailable");
+    /** Collect app-local findings for a visible warning instead of crashing ordinary browsing. */
+    static List<String> inspect(Context suppliedContext) {
+        if (suppliedContext == null) throw new IllegalStateException("application context is unavailable");
         Context context = suppliedContext.getApplicationContext();
-        if (context == null) throw blocked("application context is unavailable");
-
-        final int uid = Process.myUid();
-        if (uid == ROOT_UID || uid == SHELL_UID
-                || (uid > SHELL_UID && uid % UID_PER_USER_RANGE == SHELL_UID)) {
-            throw blocked("this app process is running as root UID 0 or shell UID 2000");
-        }
-        verifyEffectiveCapabilities();
-
-        // GeckoView's declared isolatedTab services intentionally receive an isolated UID and no
-        // app-granted permissions. They cannot answer package-scoped AppOps/DPM queries as the app.
-        // Accept only the exact GeckoView 157 process family verified in its AAR manifest.
-        if (Process.isIsolated()) {
-            String processName = Application.getProcessName();
-            String expectedPrefix = context.getPackageName() + ISOLATED_CONTENT_PROCESS_PREFIX;
-            if (processName == null || !processName.startsWith(expectedPrefix)) {
-                throw blocked("an unexpected isolated process attempted to run app code");
+        if (context == null) throw new IllegalStateException("application context is unavailable");
+        ArrayList<String> findings = new ArrayList<>();
+        int uid = Process.myUid();
+        collect(findings, "Process identity", () -> {
+            if (uid == ROOT_UID || uid == SHELL_UID
+                    || (uid > SHELL_UID && uid % UID_PER_USER_RANGE == SHELL_UID)) {
+                throw blocked("process uses root or shell UID");
             }
-            return;
+        });
+        collect(findings, "Linux capabilities", BrowserPrivilegeGuard::verifyEffectiveCapabilities);
+        // GeckoView isolated content processes cannot answer package-scoped queries. Preserve the
+        // exact process-family check as a health finding, then leave package checks to the main process.
+        if (Process.isIsolated()) {
+            collect(findings, "Isolated process", () -> {
+                String processName = Application.getProcessName();
+                String expectedPrefix = context.getPackageName() + ISOLATED_CONTENT_PROCESS_PREFIX;
+                if (processName == null || !processName.startsWith(expectedPrefix)) {
+                    throw blocked("unexpected isolated process name");
+                }
+            });
+            return Collections.unmodifiableList(findings);
         }
+        collect(findings, "Requested Android permissions", () -> verifyRequestedPermissions(context));
+        collect(findings, "Special access and AppOps", () -> verifySpecialAccess(context, uid));
+        collect(findings, "Device-management state", () -> verifyDeviceManagementState(context));
+        collect(findings, "Accessibility services", () -> verifyEnabledAccessibilityServices(context));
+        collect(findings, "Notification listeners", () -> verifyEnabledNotificationListeners(context));
+        return Collections.unmodifiableList(findings);
+    }
 
-        verifyRequestedPermissions(context);
-        verifySpecialAccess(context, uid);
-        verifyDeviceManagementState(context);
-        verifyEnabledAccessibilityServices(context);
-        verifyEnabledNotificationListeners(context);
+    private static void collect(List<String> findings, String category, Runnable check) {
+        try {
+            check.run();
+        } catch (RuntimeException | LinkageError error) {
+            String detail = error.getMessage();
+            findings.add(category + ": " + (detail == null || detail.trim().isEmpty()
+                    ? error.getClass().getSimpleName() : detail));
+        }
     }
 
     private static void verifyRequestedPermissions(Context context) {

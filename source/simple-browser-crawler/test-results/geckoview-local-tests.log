@@ -20,17 +20,20 @@ PASS: orphaned incomplete profile creation is reconciled
 PASS: metadata/directory lifecycle only; GeckoView runtime filesystem isolation requires Android device verification
 PASS: default-on persisted WebRTC policy
 PASS: experimental native peer-connection preference and fail-closed navigation gate
-PASS: strict ETP, HTTPS-only, Quad9 TRR-only, and manual system/site permission gates
-PASS: no cleartext traffic, no automatic Android permission request, pinned engine and transparent limitations
+PASS: strict ETP, HTTPS-only, Quad9 TRR-only, and runtime-system then per-site consent gates
+PASS: no cleartext traffic, allowlisted Android runtime permission request, pinned engine, and transparent limitations
 PASS: source-only checks; no runtime, public detector, or external DNS query was used
 PASS: edge-to-edge wallpaper/status bar with inset-safe controls, compact menu, 48dp tab counter, chevron-free engine picker, non-interactive forced-rotation disclosure, no wallpaper selection UI, and sparse home regressions
 PASS: seven decodable 1440x2560 wallpapers; adjacent-date advancement; fixed same-day mapping; exact seven-day cycle; timezone/date recalculation; foreground midnight refresh; no wallpaper picker or switch UI
 PASS: overflow quick-action cards and menu sections do not register 壁纸, and the dispatcher has no chooser route for a stale wallpaper action ID
-Web debug policy smoke test: PASS (both features default off; explicit panel request gates install; metadata-only capture; Android privileges unchanged)
-Web console metadata smoke test: PASS (no text/URL/wall-time fields, 500-event cap, elapsed rate limit, clear, UI/native allowlist)
-Web console privacy tests: PASS (sensitive sentinel strings absent from MAIN/ISOLATED IPC; exact metadata allowlist; opt-in/disable; errors; no page-data reads)
-PASS: exact optional permission allowlist; no broad media/sensor permissions
-PASS: camera and microphone hardware features are explicitly optional
-PASS: no Android dangerous-permission request API in application Java source
-PASS: GeckoView requests are checked; missing/unsupported cases can be denied
-PASS: generic file paths retain the system document picker; no wallpaper picker path remains
+Web debug policy smoke test: PASS (default-enabled Gecko API, explicit install prompt, top-frame/raw text only, finite and Unlimited row/entry/rate controls, unchanged Android privileges)
+Web console policy smoke test: PASS (finite and unlimited row/entry/rate modes, errors/stacks, clear, memory-only)
+Web console diagnostics tests: PASS (finite and Unlimited raw strings/argument counts, errors/stacks, top-frame only, explicit lifecycle, no extra DOM/cookie/network reads)
+PASS: ordinary guard failures become app-local warning findings; fatal context corruption remains fatal
+PASS: other app-own permission/AppOp/capability/device state checks remain in place
+PASS: fresh launch visibly lists findings and requires Continue/Exit; Settings can reopen bilingual notice
+PASS: exact Manifest permission allowlist; no broad media/sensor permissions
+PASS: camera/microphone features remain optional
+PASS: runtime request queue only requests allowlisted camera/microphone/location permissions
+PASS: Android grant is checked before Gecko's per-site permission confirmation; denial blocks the site request
+PASS: document picker remains scoped; no obsolete manual pre-authorization gate

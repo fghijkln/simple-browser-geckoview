@@ -1,0 +1,3 @@
+2981848b16070177c0a7aecd26d8f8feb73e1d007f94d8ca9aa2ebd5fee2652f  SimpleBrowser-2.9.0-arm64-v8a.apk
+f12aa570a405758fc6c090c71d35adb7fded574b96ac4d2bbf12d91dba0c2bec  SimpleBrowser-2.9.0-x86_64.apk
+3587b0d24d84ba04edcd0cf3263605af02a83ceeaf849f42c7e6c9f25557b54b  SimpleBrowser-2.9.0-source.zip

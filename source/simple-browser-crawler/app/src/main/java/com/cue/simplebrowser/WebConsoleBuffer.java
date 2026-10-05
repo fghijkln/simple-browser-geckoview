@@ -4,7 +4,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Bounded metadata-only event buffer held only in transient process memory. */
+/** User-bounded or unbounded plain-text event buffer held only in transient process memory. */
 final class WebConsoleBuffer {
     private final int capacity;
     private final int maxPerSecond;
@@ -20,24 +20,26 @@ final class WebConsoleBuffer {
     }
 
     WebConsoleBuffer(int capacity, int maxPerSecond) {
-        if (capacity < 1 || maxPerSecond < 1) throw new IllegalArgumentException("limits must be positive");
+        if (capacity < 0 || maxPerSecond < 0) throw new IllegalArgumentException("limits must be non-negative");
         this.capacity = capacity;
         this.maxPerSecond = maxPerSecond;
     }
 
     synchronized boolean add(WebConsoleEntry event, long elapsedRealtimeMillis) {
         if (event == null || elapsedRealtimeMillis < 0) return false;
-        if (rateWindowStartElapsed == Long.MIN_VALUE || elapsedRealtimeMillis < rateWindowStartElapsed
-                || elapsedRealtimeMillis - rateWindowStartElapsed >= 1000L) {
-            rateWindowStartElapsed = elapsedRealtimeMillis;
-            acceptedInWindow = 0;
+        if (maxPerSecond > 0) {
+            if (rateWindowStartElapsed == Long.MIN_VALUE || elapsedRealtimeMillis < rateWindowStartElapsed
+                    || elapsedRealtimeMillis - rateWindowStartElapsed >= 1000L) {
+                rateWindowStartElapsed = elapsedRealtimeMillis;
+                acceptedInWindow = 0;
+            }
+            if (acceptedInWindow >= maxPerSecond) {
+                droppedByRateLimit++;
+                return false;
+            }
+            acceptedInWindow++;
         }
-        if (acceptedInWindow >= maxPerSecond) {
-            droppedByRateLimit++;
-            return false;
-        }
-        acceptedInWindow++;
-        while (entries.size() >= capacity) entries.removeFirst();
+        if (capacity > 0) while (entries.size() >= capacity) entries.removeFirst();
         entries.addLast(event.withSequence(nextSequence++));
         return true;
     }
@@ -48,6 +50,10 @@ final class WebConsoleBuffer {
 
     synchronized int size() {
         return entries.size();
+    }
+
+    int capacity() {
+        return capacity;
     }
 
     synchronized long droppedByRateLimit() {

@@ -38,6 +38,10 @@ final class CrawlerHtmlParser {
     }
 
     static Document parse(String source, String pageUrl) {
+        return parse(source, pageUrl, 0);
+    }
+
+    static Document parse(String source, String pageUrl, int maxLinks) {
         if (source == null) return new Document("", "", Collections.<String>emptyList());
         StringBuilder text = new StringBuilder(Math.min(source.length(), 16_384));
         StringBuilder title = new StringBuilder(256);
@@ -45,7 +49,7 @@ final class CrawlerHtmlParser {
         int hiddenDepth = 0;
         boolean inTitle = false;
         int cursor = 0;
-        while (cursor < source.length() && text.length() < 12_000) {
+        while (cursor < source.length()) {
             int opening = source.indexOf('<', cursor);
             if (opening < 0) {
                 if (hiddenDepth == 0) appendText(text, source.substring(cursor));
@@ -83,7 +87,7 @@ final class CrawlerHtmlParser {
                 if (isBlock(name)) appendSpace(text);
                 continue;
             }
-            if ("a".equals(name) && links.size() < ControlledCrawler.MAX_LINKS * 4) {
+            if ("a".equals(name) && (maxLinks == 0 || links.size() < maxLinks)) {
                 String href = attribute(rawTag.substring(nameEnd), "href");
                 String candidate = resolveLink(pageUrl, href);
                 if (candidate != null) links.add(candidate);
